@@ -2,6 +2,7 @@ numpy>=1.24.0,<2.0  # UHD requiere NumPy 1.x
 scipy>=1.7.0
 matplotlib>=3.4.0
 pyyaml>=5.4.0
+h5py>=3.0.0  # Para leer archivos .mat en formato MATLAB v7.3 (HDF5)
 
 # NOTA: uhd no está disponible en PyPI
 # Instalación en Ubuntu/Debian:

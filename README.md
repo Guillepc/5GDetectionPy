@@ -1,272 +1,302 @@
-# Monitoreo Continuo 5G NR con USRP B210
+# Demodulador 5G NR 100% Python
 
-Sistema de monitoreo y análisis de señales 5G NR usando USRP B210 en Python.
+Demodulador de señales 5G NR que detecta Cell ID, SSB, potencia y SNR desde archivos `.mat` capturados con SDR.
 
-## Requisitos
+## ✅ Características
 
-### Hardware
-- USRP B210 (Ettus Research)
-- Antena compatible con banda 5G (3.3-3.8 GHz para n78)
-- Cable USB 3.0
+- **100% Python**: Sin dependencias de MATLAB
+- **Open Source**: Usa py3gpp (implementación libre de 5G NR)
+- **Cell ID correcto**: Detecta NID1 y NID2 correctamente
+- **Método robusto**: Usa OFDM modulation + correlación (replica MATLAB nrTimingEstimate)
+- **Validado**: Probado contra resultados de MATLAB
 
-### Software
-- Ubuntu 20.04+ (o distribución compatible)
-- Python 3.8+
-- UHD (USRP Hardware Driver)
-
-## Instalación
-
-### 1. Instalar UHD del sistema
+## 📦 Requisitos
 
 ```bash
-sudo apt update
-sudo apt install -y python3-uhd uhd-host libuhd-dev
-sudo uhd_images_downloader
+pip install numpy scipy h5py matplotlib py3gpp
 ```
 
-### 2. Configurar entorno Python
-
+O usando el archivo requirements.txt:
 ```bash
-# Crear entorno virtual
-python3 -m venv env
-source env/bin/activate
-
-# Instalar dependencias
 pip install -r requirements.txt
-
-# Enlazar UHD al entorno virtual
-ln -s /usr/lib/python3/dist-packages/uhd env/lib/python3.*/site-packages/uhd
 ```
 
-### 3. Verificar instalación
+## 🚀 Inicio rápido
+
+Para ver ejemplos de uso:
+```bash
+python demo_usage.py
+```
+
+## 📖 Uso detallado
+
+### Uso básico
 
 ```bash
-# Listar dispositivos USRP
-python monitoreo_continuo.py --list-devices
-
-# Probar modo simulación
-python monitoreo_continuo.py --simulate --no-gui --monitor-time 0.1
+python demodulate_5g_nr.py archivo.mat [carpeta_salida]
 ```
 
-## Uso
+**Parámetros:**
+- `archivo.mat`: Ruta al archivo .mat con la señal capturada (variable `waveform`)
+- `carpeta_salida`: (Opcional) Carpeta donde guardar imagen PNG y logs TXT
 
-### Listar dispositivos disponibles
+### Ejemplos
 
+**Sin guardar imágenes:**
 ```bash
-python monitoreo_continuo.py --list-devices
+python demodulate_5g_nr.py 5GDetection/capturas_disco_con/timestamp_20251210_120747_292.mat
 ```
 
-Salida ejemplo:
-```
-=== DISPOSITIVOS USRP DISPONIBLES ===
-
-[0] Dispositivo encontrado:
-    type: b200
-    serial: 12345678
-    name: MyB210
-========================================
-```
-
-### Uso básico con hardware
-
+**Guardando imágenes y logs:**
 ```bash
-# Usar primer dispositivo (si solo hay uno conectado)
-python monitoreo_continuo.py
-
-# Especificar dispositivo por índice
-python monitoreo_continuo.py --device-index 0
-
-# Especificar por número de serie
-python monitoreo_continuo.py --device-serial 12345678
+python demodulate_5g_nr.py 5GDetection/capturas_disco_con/timestamp_20251210_120747_292.mat resource_grids_output
 ```
 
-### Configuración RF
-
+**Procesamiento por lotes:**
 ```bash
-# Cambiar frecuencia usando GSCN (Global Synchronization Channel Number)
-python monitoreo_continuo.py --gscn 7929  # 3619.2 MHz (banda n78)
-
-# Ajustar ganancia del receptor
-python monitoreo_continuo.py --gain 40  # 40 dB
-
-# Cambiar tasa de muestreo
-python monitoreo_continuo.py --sample-rate 23.04e6  # 23.04 MHz
-
-# Configurar subcarrier spacing
-python monitoreo_continuo.py --scs 30  # 30 kHz (opciones: 15, 30, 60, 120, 240)
+# Procesar 5 archivos guardando imágenes
+python test_batch.py 5GDetection/capturas_disco_con 5 resource_grids_batch
 ```
 
-### Parámetros de monitoreo
+### Salida
 
-```bash
-# Tiempo total de monitoreo
-python monitoreo_continuo.py --monitor-time 1.0  # 1 segundo
+```
+======================================================================
+Demodulando: timestamp_20251210_120747_292.mat
+======================================================================
+✓ Waveform cargado: 390000 muestras
+Corrección de frecuencia y detección PSS...
+  Probando 65 offsets × 3 NID2...
+  → NID2: 0, Freq offset: -2.000 kHz
+  Timing offset: 66911 muestras
+Demodulación OFDM...
+Detección de Cell ID (SSS)...
+  → NID1: 0
+Demodulando 8 SSB bursts...
+Detección de SSB más fuerte...
+  → SSB más fuerte: 0
 
-# Intervalo entre capturas
-python monitoreo_continuo.py --interval 0.1  # 100 ms
-
-# Frames por captura
-python monitoreo_continuo.py --frames 2  # 2 frames (20 ms)
-
-# Sin visualización gráfica
-python monitoreo_continuo.py --no-gui
+======================================================================
+RESULTADOS
+======================================================================
+Cell ID: 0 (NID1=0, NID2=0)
+Strongest SSB: 0
+Potencia: -16.3 dB
+SNR: 12.4 dB
+Freq offset: -2.000 kHz
+Timing offset: 66911 muestras
+======================================================================
 ```
 
-### Modo simulación (sin hardware)
+## 🔧 Uso programático
 
-```bash
-# Generar datos sintéticos para pruebas
-python monitoreo_continuo.py --simulate
+```python
+from demodulate_5g_nr import demodulate_single
 
-# Simulación sin GUI
-python monitoreo_continuo.py --simulate --no-gui
+result = demodulate_single(
+    mat_file='archivo.mat',
+    scs=30,                    # Subcarrier spacing (kHz): 15 o 30
+    gscn=7929,                 # GSCN del canal (ej: 7929 para 3.75 GHz)
+    lmax=8,                    # Número de SSB bursts (típicamente 8)
+    verbose=True,              # Mostrar información detallada
+    output_folder='mi_carpeta' # Opcional: guardar imagen y log
+)
+
+if result:
+    print(f"Cell ID: {result['cell_id']}")
+    print(f"NID1: {result['nid1']}, NID2: {result['nid2']}")
+    print(f"Strongest SSB: {result['strongest_ssb']}")
+    print(f"Potencia: {result['power_db']:.1f} dB")
+    print(f"SNR: {result['snr_db']:.1f} dB")
+    print(f"Freq offset: {result['freq_offset']/1e3:.3f} kHz")
+    print(f"Timing offset: {result['timing_offset']} muestras")
 ```
 
-### Ejemplos completos
+### Parámetros configurables
 
-```bash
-# Monitoreo en banda n78 con ganancia media
-python monitoreo_continuo.py --gscn 7929 --gain 45 --monitor-time 2.0
+| Parámetro | Tipo | Por defecto | Descripción |
+|-----------|------|-------------|-------------|
+| `mat_file` | str | - | **Requerido**. Ruta al archivo .mat |
+| `scs` | int | 30 | Subcarrier spacing en kHz (15 o 30) |
+| `gscn` | int | 7929 | GSCN del canal sincronización |
+| `lmax` | int | 8 | Número máximo de SSB bursts |
+| `verbose` | bool | True | Mostrar información detallada |
+| `output_folder` | str | None | Carpeta para guardar PNG y TXT |
 
-# Múltiples dispositivos - usar el segundo
-python monitoreo_continuo.py --device-index 1 --gain 50
+### Valores de retorno
 
-# Captura extendida sin visualización
-python monitoreo_continuo.py --monitor-time 10 --interval 0.5 --no-gui
+La función `demodulate_single()` retorna un diccionario con:
 
-# Prueba rápida en modo simulación
-python monitoreo_continuo.py --simulate --monitor-time 0.2 --interval 0.1 --no-gui
+```python
+{
+    'cell_id': int,           # Cell ID físico (0-1007)
+    'nid1': int,              # Physical cell ID group (0-335)
+    'nid2': int,              # PSS ID (0-2)
+    'strongest_ssb': int,     # Índice del SSB más fuerte (0-7)
+    'power_db': float,        # Potencia en dB
+    'snr_db': float,          # SNR estimado en dB
+    'freq_offset': float,     # Offset de frecuencia en Hz
+    'timing_offset': int,     # Offset de timing en muestras
+    'sss_correlation': float  # Valor de correlación SSS
+}
 ```
 
-## Argumentos de línea de comandos
+## 📊 Salida de archivos
 
-### Selección de dispositivo
-- `--list-devices`: Lista dispositivos USRP disponibles y sale
-- `--device-index N`: Índice del dispositivo a usar (0, 1, 2, ...)
-- `--device-serial SERIAL`: Número de serie del dispositivo
-- `--device-args ARGS`: Argumentos adicionales del dispositivo
+Cuando se especifica `output_folder`, el script genera:
 
-### Configuración RF
-- `--gscn GSCN`: Global Synchronization Channel Number (default: 7929)
-- `--sample-rate Hz`: Tasa de muestreo en Hz (default: 19.5e6)
-- `--gain dB`: Ganancia del receptor en dB (default: 50)
-- `--scs {15,30,60,120,240}`: Subcarrier spacing en kHz (default: 30)
-
-### Parámetros de monitoreo
-- `--monitor-time s`: Tiempo total de monitoreo en segundos (default: 0.57)
-- `--interval s`: Intervalo entre capturas en segundos (default: 0.057)
-- `--frames N`: Número de frames por captura (default: 1)
-
-### Otros
-- `--simulate`: Modo simulación (sin hardware)
-- `--no-gui`: Desactivar visualización gráfica
-- `-h, --help`: Mostrar ayuda
-
-## Frecuencias 5G NR (FR1)
-
-### Banda n78 (3.3-3.8 GHz)
-| GSCN | Frecuencia (MHz) | Descripción |
-|------|------------------|-------------|
-| 7499 | 3000.00 | Inicio banda |
-| 7929 | 3619.20 | Común en Europa |
-| 8065 | 3815.04 | Común en Asia |
-| 8255 | 4088.64 | Fin banda n78 |
-
-Cálculo: `Freq(MHz) = 3000 + (GSCN - 7499) × 1.44`
-
-## Estructura del código
-
-- **USRPB210Receiver**: Clase para control del hardware USRP
-  - Configuración de frecuencia, ganancia, tasa de muestreo
-  - Captura de muestras IQ
+- **`nombre_archivo_resource_grid.png`**: Imagen del resource grid con:
+  - **Dimensiones**: 540 subportadoras × 54 símbolos OFDM (45 RB)
+  - Mapa de calor con colormap 'jet' mostrando magnitud
+  - Rectángulo blanco marcando el SSB (240 subportadoras × 4 símbolos)
+  - Etiqueta del SSB más fuerte dentro del rectángulo
+  - Cell ID y SNR en el título
+  - **Igual formato que la versión MATLAB**
   
-- **NR5GProcessor**: Clase para procesamiento de señales 5G NR
-  - Corrección de frecuencia
-  - Demodulación OFDM
-  - Detección de SSB (Synchronization Signal Block)
-  - Identificación de Cell ID
+- **`nombre_archivo_info.txt`**: Log con información completa:
+  - Cell ID, NID1, NID2
+  - Strongest SSB index
+  - Potencia y SNR estimados
+  - Offset de frecuencia y timing
+  - Parámetros de configuración (SCS, sample rate, GSCN)
+
+- **`nombre_archivo_ERROR.txt`**: (solo si hay error) Stack trace completo
+
+## 📊 Validación
+
+Comparación con MATLAB para `timestamp_20251210_120747_292.mat`:
+
+| Parámetro | Python | MATLAB | Estado |
+|-----------|--------|--------|--------|
+| Cell ID | 0 | 0 | ✅ |
+| NID1 | 0 | 0 | ✅ |
+| NID2 | 0 | 0 | ✅ |
+| Freq offset | -2.0 kHz | -2.18 kHz | ✅ (~200 Hz diff) |
+
+Probado en múltiples archivos:
+- `timestamp_20251210_120747_292.mat` → Cell ID: 0 ✅
+- `timestamp_20251210_120747_317.mat` → Cell ID: 0 ✅
+- `timestamp_20251210_120747_384.mat` → Cell ID: 0 ✅
+- `timestamp_20251210_120747_452.mat` → Cell ID: 0 ✅
+
+## 🛠️ Detalles técnicos
+
+### Algoritmo
+
+1. **Corrección de frecuencia y detección PSS**:
+   - Búsqueda gruesa: ±90 kHz con paso de 15 kHz
+   - Búsqueda fina: ±15 kHz con paso de 500 Hz
+   - Método: OFDM modulation + correlación (como MATLAB nrTimingEstimate)
+   - Detecta NID2 (0, 1 o 2)
+
+2. **Estimación de timing offset**:
+   - Correlación directa con secuencia PSS
+   - Encuentra inicio del SSB burst
+
+3. **Demodulación OFDM**:
+   - 4 símbolos OFDM del SSB block
+   - FFT 256 puntos
+   - 20 RBs (240 subportadoras)
+
+4. **Detección de Cell ID**:
+   - Extrae símbolos SSS
+   - Correlaciona con 336 posibles NID1
+   - Fórmula: `sum(abs(sssRx .* conj(sssRef))^2)`
+
+5. **Detección de SSB más fuerte**:
+   - Demodula 8 SSB bursts
+   - Estima potencia del SSS
+   - Estima SNR usando PBCH-DMRS
+
+### Diferencias con MATLAB
+
+- **Método PSS**: Python usa OFDM modulation explícita (más transparente)
+- **Búsqueda frecuencia**: Python tiene búsqueda fina adicional
+- **Precisión timing**: Python ~66911 vs MATLAB 64197 (~2700 samples = 140 µs @ 19.5 MHz)
+
+## 📝 Formato de archivos .mat
+
+El script soporta:
+- **MATLAB v7**: Formato binario estándar
+- **MATLAB v7.3**: Formato HDF5 (requiere h5py)
+
+### Requisitos del archivo
+
+Los archivos `.mat` deben contener:
+- **Variable `waveform`**: Señal IQ compleja (muestras capturadas del SDR)
+- **Formato**: Vector columna o fila (se convierte automáticamente)
+- **Tipo de datos**: Complex double (real + imaginario)
+- **Sample rate**: 19.5 MHz (configurable en código)
+
+### Ejemplo de captura con SDR
+
+```matlab
+% MATLAB - Captura con SDR
+rx = comm.SDRuReceiver('CenterFrequency', 3750e6, ...
+                       'SampleRate', 19.5e6, ...
+                       'Gain', 50, ...
+                       'SamplesPerFrame', 390000);
+waveform = rx();
+save('captura.mat', 'waveform', '-v7.3');
+```
+
+## 🐛 Troubleshooting
+
+### Error: "h5py no disponible"
+```bash
+pip install h5py
+```
+
+### Error: "No module named 'py3gpp'"
+```bash
+pip install py3gpp
+```
+
+### Resultados incorrectos
+- Verificar que `scs` es correcto (30 kHz para FR1 banda n78)
+- Verificar que el archivo .mat contiene señal 5G NR válida
+- Ajustar `search_bw` si el offset de frecuencia es muy grande
+
+## 📚 Referencias
+
+- [py3gpp](https://github.com/NajibOdhah/py3gpp): Implementación Python de 5G NR
+- [3GPP TS 38.211](https://www.3gpp.org/DynaReport/38211.htm): Physical channels and modulation
+- [3GPP TS 38.213](https://www.3gpp.org/DynaReport/38213.htm): Physical layer procedures
+
+## 👤 Autor
+
+Desarrollo: Diciembre 2024
+
+## 📁 Estructura del proyecto
+
+```
+5GDetectionPy/
+├── demodulate_5g_nr.py      # Script principal de demodulación
+├── test_batch.py             # Procesamiento por lotes
+├── demo_usage.py             # Ejemplos de uso completos
+├── README.md                 # Este archivo (documentación)
+├── requirements.txt          # Dependencias Python
+├── config.yaml               # Configuración (opcional)
+└── 5GDetection/              # Carpeta de datos
+    ├── capturas_disco_con/   # Capturas con señal 5G
+    └── capturas_disco_sin/   # Capturas sin señal (pruebas)
+```
+
+### Archivos principales
+
+- **`demodulate_5g_nr.py`** (16 KB): Implementación completa del demodulador
+  - Funciones: `load_mat_file()`, `hssb_burst_frequency_correct_ofdm()`, `detect_cell_id_sss()`, `demodulate_single()`
+  - Puede usarse como script CLI o importarse como módulo
   
-- **Funciones principales**:
-  - `list_usrp_devices()`: Lista dispositivos disponibles
-  - `select_usrp_device()`: Selecciona dispositivo específico
-  - `capture_waveforms()`: Captura múltiples waveforms
-  - `demodulate_all()`: Demodula todos los waveforms
-  - `visualize_resource_grids()`: Visualiza resultados
+- **`test_batch.py`** (2.4 KB): Procesamiento batch de múltiples archivos
+  - Útil para procesar carpetas completas
+  - Soporta limitación de número de archivos
+  
+- **`demo_usage.py`** (~2 KB): Ejemplos de uso documentados
+  - `demo_basic()`: Procesamiento básico sin salida
+  - `demo_with_images()`: Procesamiento con imágenes
+  - `demo_multiple_files()`: Procesamiento batch
 
-## Solución de problemas
+## 📄 Licencia
 
-### No se encuentra el dispositivo
-```bash
-# Verificar conexión USB
-lsusb | grep Ettus
-
-# Listar con verbose
-python monitoreo_continuo.py --list-devices
-
-# Verificar permisos
-sudo usermod -a -G usrp $USER  # Reiniciar sesión después
-```
-
-### Error de importación de UHD
-```bash
-# Verificar instalación
-python -c "import uhd; print('UHD OK')"
-
-# Reinstalar si es necesario
-sudo apt install --reinstall python3-uhd
-
-# Verificar enlace simbólico
-ls -l env/lib/python3.*/site-packages/uhd
-```
-
-### Error de compatibilidad NumPy
-```bash
-# UHD requiere NumPy 1.x
-pip install "numpy<2"
-```
-
-### Imagen de firmware no encontrada
-```bash
-# Descargar imágenes del firmware
-sudo uhd_images_downloader
-
-# Verificar variable de entorno
-echo $UHD_IMAGES_DIR
-export UHD_IMAGES_DIR=/usr/share/uhd/images
-```
-
-## Salida del programa
-
-El programa genera las siguientes métricas:
-
-- **Potencia**: Potencia promedio de la señal en dB
-- **SNR**: Relación señal-ruido estimada en dB
-- **Cell ID**: Physical Cell ID detectado (0-1007)
-- **Resource Grid**: Visualización del grid de recursos OFDM
-
-### Ejemplo de salida:
-```
-=== RESUMEN DE TIEMPOS ===
-Captura promedio: 0.023s (total: 0.231s)
-Demodulación promedio: 1.245s (total: 12.450s)
-Visualización: 0.105s
-
-=== MÉTRICAS DE SEÑAL ===
-Potencia promedio: -45.3 dB
-SNR promedio: 12.7 dB
-Cell IDs detectados: {156, 157}
-```
-
-## Referencias
-
-- [3GPP TS 38.211](https://www.3gpp.org/DynaReport/38211.htm) - Physical channels and modulation
-- [Ettus Research UHD Documentation](https://files.ettus.com/manual/)
-- [5G NR Specifications](https://www.3gpp.org/specifications-technologies/releases/release-15)
-
-## Licencia
-
-Este proyecto es parte de trabajos de investigación y monitoreo de redes 5G.
-
-## Autor
-
-Desarrollado para análisis y monitoreo de señales 5G NR en tiempo real.
+Este código es de uso educativo e investigación.
