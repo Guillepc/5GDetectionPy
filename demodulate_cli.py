@@ -9,9 +9,13 @@ import argparse
 from pathlib import Path
 
 from nr_demodulator import demodulate_file, demodulate_folder
+from config_loader import get_config
 
 
 def main():
+    # Cargar configuración para defaults
+    config = get_config()
+    
     parser = argparse.ArgumentParser(
         description='Demodulador 5G NR - Procesa archivos .mat individuales o carpetas completas'
     )
@@ -32,16 +36,16 @@ def main():
     parser.add_argument(
         '--scs',
         type=int,
-        default=30,
+        default=None,
         choices=[15, 30],
-        help='Subcarrier spacing en kHz (default: 30)'
+        help=f'Subcarrier spacing en kHz (default: {config.scs} desde config.yaml)'
     )
     
     parser.add_argument(
         '--gscn',
         type=int,
-        default=7929,
-        help='GSCN del canal (default: 7929)'
+        default=None,
+        help=f'GSCN del canal (default: {config.gscn} desde config.yaml)'
     )
     
     parser.add_argument(

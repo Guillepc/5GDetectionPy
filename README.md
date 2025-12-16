@@ -16,13 +16,34 @@ pip install -r requirements.txt
 pip install uhd pyyaml
 ```
 
+## Configuración
+
+Los parámetros por defecto se definen en `config.yaml`. Este archivo centraliza todos los parámetros de RF, procesamiento, visualización y exportación. Los argumentos de la CLI sobreescriben los valores de `config.yaml`.
+
+### Parámetros principales en config.yaml
+
+```yaml
+rf:
+  gscn: 7929                 # Global Sync Channel Number
+  sample_rate: 19.5e6       # Tasa de muestreo (Hz)
+  scs: 30                   # Subcarrier spacing (kHz)
+
+processing:
+  nrb_ssb: 20               # Resource blocks para SSB
+  nrb_demod: 45             # Resource blocks para demodulación
+  search_bw: 90             # Ancho de banda de búsqueda (kHz)
+```
+
 ## Uso
 
 ### 1. Procesamiento de archivos .mat (CLI)
 
 ```bash
-# Procesar un archivo
+# Procesar archivo (usa config.yaml)
 python demodulate_cli.py captura.mat -o resultados/
+
+# Sobreescribir parámetros de config.yaml
+python demodulate_cli.py captura.mat -o resultados/ --scs 15 --gscn 7880
 
 # Procesar carpeta completa
 python demodulate_cli.py carpeta/ -o resultados/ --pattern "*.mat"
@@ -82,14 +103,18 @@ Al procesar archivos se generan:
 - `<archivo>_info.txt` - Log con Cell ID, NID1/NID2, SNR, potencia, offsets
 - `<archivo>_ERROR.txt` - Log de errores (si ocurren)
 
-## Parámetros principales
+## Parámetros CLI
 
-| Parámetro | Descripción | Por defecto |
+Todos los parámetros son opcionales y sobreescriben los valores de `config.yaml`:
+
+| Parámetro | Descripción | Default (config.yaml) |
 |-----------|-------------|-------------|
 | `--scs` | Subcarrier spacing (kHz) | 30 |
 | `--gscn` | Global Sync Channel Number | 7929 |
 | `--lmax` | Número de SSB bursts | 8 |
 | `--pattern` | Patrón de archivos | `*.mat` |
+| `--verbose` | Modo detallado | False (silencioso) |
+| `--show-axes` | Imágenes con ejes | False (sin ejes) |
 
 ## Troubleshooting
 

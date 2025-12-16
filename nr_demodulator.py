@@ -24,6 +24,7 @@ from cell_detection import detect_cell_id, detect_strongest_ssb
 from visualization import (plot_resource_grid, save_demodulation_log, save_error_log,
                            init_processing_log, append_success_to_log, 
                            append_error_to_log, finalize_processing_log)
+from config_loader import get_config
 
 
 def load_mat_file(filename: str) -> np.ndarray:
@@ -58,8 +59,8 @@ def load_mat_file(filename: str) -> np.ndarray:
 
 
 def demodulate_ssb(waveform: np.ndarray,
-                   scs: int = 30,
-                   sample_rate: float = 19.5e6,
+                   scs: Optional[int] = None,
+                   sample_rate: Optional[float] = None,
                    lmax: int = 8,
                    verbose: bool = False) -> Dict[str, Any]:
     """
@@ -68,8 +69,8 @@ def demodulate_ssb(waveform: np.ndarray,
     
     Args:
         waveform: Señal IQ capturada
-        scs: Subcarrier spacing en kHz (15 o 30)
-        sample_rate: Sample rate en Hz
+        scs: Subcarrier spacing en kHz (15 o 30). Si None, usa config.yaml
+        sample_rate: Sample rate en Hz. Si None, usa config.yaml
         lmax: Número de SSB bursts a procesar (típicamente 8)
         verbose: Mostrar información detallada del procesamiento
     
@@ -85,10 +86,19 @@ def demodulate_ssb(waveform: np.ndarray,
             - grid_display: Resource grid para visualización (540×54)
             - waveform_corrected: Waveform con correcciones aplicadas
     """
+    # Cargar configuración
+    config = get_config()
+    
+    # Usar valores de config si no se especifican
+    if scs is None:
+        scs = config.scs
+    if sample_rate is None:
+        sample_rate = config.sample_rate
+    
     # 1. Corrección de frecuencia
     if verbose:
         print("Corrección de frecuencia y detección PSS...")
-    search_bw = 3 * scs
+    search_bw = config.search_bw  # En kHz desde config.yaml
     waveform_corrected, freq_offset, nid2 = frequency_correction_ofdm(
         waveform, scs, sample_rate, search_bw, verbose=verbose
     )
@@ -101,7 +111,7 @@ def demodulate_ssb(waveform: np.ndarray,
     waveform_aligned = waveform_corrected[timing_offset:]
     
     # 3. Demodulación OFDM del primer SSB
-    nrb_ssb = 20
+    nrb_ssb = config.nrb_ssb
     n_symbols_ssb = 4
     nfft_ssb = 256
     
@@ -153,7 +163,7 @@ def demodulate_ssb(waveform: np.ndarray,
     strongest_ssb, power_db, snr_db = detect_strongest_ssb(ssb_grids, nid2, nid1, lmax, verbose=verbose)
     
     # 7. Crear resource grid para visualización (45 RB)
-    demod_rb = 45
+    demod_rb = config.nrb_demod
     grid_full = nrOFDMDemodulate(
         waveform=waveform_aligned,
         nrb=demod_rb,
@@ -190,8 +200,8 @@ def demodulate_ssb(waveform: np.ndarray,
 
 
 def demodulate_file(mat_file: str, 
-                   scs: int = 30,
-                   gscn: int = 7929,
+                   scs: Optional[int] = None,
+                   gscn: Optional[int] = None,
                    lmax: int = 8,
                    output_folder: Optional[str] = None,
                    save_plot: bool = True,
@@ -202,8 +212,8 @@ def demodulate_file(mat_file: str,
     
     Args:
         mat_file: Ruta al archivo .mat
-        scs: Subcarrier spacing en kHz
-        gscn: GSCN del canal
+        scs: Subcarrier spacing en kHz (Si None, usa config.yaml)
+        gscn: GSCN del canal (Si None, usa config.yaml)
         lmax: Número de SSB bursts
         output_folder: Carpeta para guardar resultados (None = no guardar)
         save_plot: Guardar imagen del resource grid
@@ -213,6 +223,13 @@ def demodulate_file(mat_file: str,
     Returns:
         Diccionario con resultados o None si falla
     """
+    # Cargar configuración
+    config = get_config()
+    if scs is None:
+        scs = config.scs
+    if gscn is None:
+        gscn = config.gscn
+    
     if verbose:
         print("="*70)
         print(f"Demodulando: {Path(mat_file).name}")
@@ -290,8 +307,8 @@ def demodulate_file(mat_file: str,
 
 
 def demodulate_folder(folder_path: str,
-                     scs: int = 30,
-                     gscn: int = 7929,
+                     scs: Optional[int] = None,
+                     gscn: Optional[int] = None,
                      lmax: int = 8,
                      output_folder: Optional[str] = None,
                      pattern: str = "*.mat",
@@ -302,8 +319,8 @@ def demodulate_folder(folder_path: str,
     
     Args:
         folder_path: Ruta a la carpeta con archivos .mat
-        scs: Subcarrier spacing en kHz
-        gscn: GSCN del canal
+        scs: Subcarrier spacing en kHz (Si None, usa config.yaml)
+        gscn: GSCN del canal (Si None, usa config.yaml)
         lmax: Número de SSB bursts
         output_folder: Carpeta para guardar resultados
         pattern: Patrón de archivos a procesar
@@ -313,6 +330,13 @@ def demodulate_folder(folder_path: str,
     Returns:
         Diccionario con estadísticas y resultados
     """
+    # Cargar configuración
+    config = get_config()
+    if scs is None:
+        scs = config.scs
+    if gscn is None:
+        gscn = config.gscn
+    
     folder = Path(folder_path)
     mat_files = sorted(folder.glob(pattern))
     
