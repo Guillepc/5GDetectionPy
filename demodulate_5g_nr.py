@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
-Demodulador 5G NR 100% Python - VERSIÓN CON OFDM
-Usa nrOFDMModulate + nrTimingEstimate para PSS detection (como MATLAB)
+DEPRECATED: Use demodulate_cli.py instead.
+Este archivo se mantiene por compatibilidad pero se recomienda usar:
+  - README.md: Documentación completa con ejemplos
+  - demodulate_cli.py: Interfaz de línea de comandos
+  - nr_demodulator.py: API para uso programático
+  - live_example.py: Ejemplos de integración en tiempo real
 """
 
 import numpy as np
