@@ -13,7 +13,7 @@ from py3gpp.nrOFDMModulate import nrOFDMModulate
 
 
 def frequency_correction_ofdm(waveform: np.ndarray, scs: int, sample_rate: float, 
-                               search_bw: float) -> Tuple[np.ndarray, float, int]:
+                               search_bw: float, verbose: bool = False) -> Tuple[np.ndarray, float, int]:
     """
     Corrección de frecuencia y detección de PSS usando OFDM modulation.
     
@@ -22,13 +22,15 @@ def frequency_correction_ofdm(waveform: np.ndarray, scs: int, sample_rate: float
         scs: Subcarrier spacing en kHz (típicamente 30)
         sample_rate: Sample rate en Hz (típicamente 19.5e6)
         search_bw: Ancho de búsqueda en kHz (típicamente 3*scs = 90)
+        verbose: Mostrar información detallada del procesamiento
     
     Returns:
         waveform_corrected: Waveform con corrección de frecuencia
         freq_offset: Offset de frecuencia detectado en Hz
         nid2: PSS ID detectado (0, 1 o 2)
     """
-    print("Corrección de frecuencia y detección PSS (método OFDM)...")
+    if verbose:
+        print("Corrección de frecuencia y detección PSS (método OFDM)...")
     
     # Parámetros de sincronización
     sync_nfft = 256
@@ -52,7 +54,8 @@ def frequency_correction_ofdm(waveform: np.ndarray, scs: int, sample_rate: float
     peak_values = np.zeros((len(fshifts), 3))
     t = np.arange(len(waveform)) / sample_rate
     
-    print(f"  Probando {len(fshifts)} offsets de frecuencia × 3 NID2...")
+    if verbose:
+        print(f"  Probando {len(fshifts)} offsets de frecuencia × 3 NID2...")
     
     for f_idx, f_shift in enumerate(fshifts):
         waveform_corrected = waveform * np.exp(-1j * 2 * np.pi * f_shift * t)
@@ -80,17 +83,19 @@ def frequency_correction_ofdm(waveform: np.ndarray, scs: int, sample_rate: float
     # Normalizar y mostrar resultados
     peak_values_norm = peak_values / np.max(peak_values) if np.max(peak_values) > 0 else peak_values
     
-    print(f"\n  Matriz de correlaciones PSS (normalizadas):")
-    print(f"  {'Freq (kHz)':>12} {'NID2=0':>12} {'NID2=1':>12} {'NID2=2':>12}")
-    for i, f in enumerate(fshifts):
-        print(f"  {f/1e3:>12.2f} {peak_values_norm[i, 0]:>12.3f} {peak_values_norm[i, 1]:>12.3f} {peak_values_norm[i, 2]:>12.3f}")
+    if verbose:
+        print(f"\n  Matriz de correlaciones PSS (normalizadas):")
+        print(f"  {'Freq (kHz)':>12} {'NID2=0':>12} {'NID2=1':>12} {'NID2=2':>12}")
+        for i, f in enumerate(fshifts):
+            print(f"  {f/1e3:>12.2f} {peak_values_norm[i, 0]:>12.3f} {peak_values_norm[i, 1]:>12.3f} {peak_values_norm[i, 2]:>12.3f}")
     
     best_f_idx, best_nid2 = np.unravel_index(np.argmax(peak_values), peak_values.shape)
     freq_offset = fshifts[best_f_idx]
     
-    print(f"\n  → NID2 detectado: {best_nid2}")
-    print(f"  → Offset de frecuencia: {freq_offset/1e3:.3f} kHz")
-    print(f"  → Pico máximo: {peak_values[best_f_idx, best_nid2]:.2f}")
+    if verbose:
+        print(f"\n  → NID2 detectado: {best_nid2}")
+        print(f"  → Offset de frecuencia: {freq_offset/1e3:.3f} kHz")
+        print(f"  → Pico máximo: {peak_values[best_f_idx, best_nid2]:.2f}")
     
     waveform_corrected = waveform * np.exp(-1j * 2 * np.pi * freq_offset * t)
     

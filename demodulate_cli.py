@@ -64,6 +64,12 @@ def main():
         help='No guardar imágenes de resource grids'
     )
     
+    parser.add_argument(
+        '--verbose',
+        action='store_true',
+        help='Mostrar información detallada del procesamiento (por defecto modo silencioso)'
+    )
+    
     args = parser.parse_args()
     
     input_path = Path(args.input)
@@ -80,7 +86,8 @@ def main():
             gscn=args.gscn,
             lmax=args.lmax,
             output_folder=args.output,
-            save_plot=not args.no_plot
+            save_plot=not args.no_plot,
+            verbose=args.verbose
         )
         
         if result:
@@ -98,7 +105,8 @@ def main():
             gscn=args.gscn,
             lmax=args.lmax,
             output_folder=args.output,
-            pattern=args.pattern
+            pattern=args.pattern,
+            verbose=args.verbose
         )
         
         if summary['successful'] > 0:

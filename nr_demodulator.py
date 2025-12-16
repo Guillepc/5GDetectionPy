@@ -20,8 +20,10 @@ except ImportError:
 
 from frequency_correction import frequency_correction_ofdm
 from timing_estimation import estimate_timing_offset
-from cell_detection import detect_cell_id_sss, detect_strongest_ssb
-from visualization import plot_resource_grid, save_demodulation_log, save_error_log
+from cell_detection import detect_cell_id, detect_strongest_ssb
+from visualization import (plot_resource_grid, save_demodulation_log, save_error_log,
+                           init_processing_log, append_success_to_log, 
+                           append_error_to_log, finalize_processing_log)
 
 
 def load_mat_file(filename: str) -> np.ndarray:
@@ -55,10 +57,11 @@ def load_mat_file(filename: str) -> np.ndarray:
             raise RuntimeError(f"Error leyendo .mat: v7 falló ({e1}), v7.3 falló ({e2})")
 
 
-def demodulate_ssb(waveform: np.ndarray, 
+def demodulate_ssb(waveform: np.ndarray,
                    scs: int = 30,
                    sample_rate: float = 19.5e6,
-                   lmax: int = 8) -> Dict[str, Any]:
+                   lmax: int = 8,
+                   verbose: bool = False) -> Dict[str, Any]:
     """
     Demodula una señal SSB y detecta Cell ID.
     Función principal para uso desde otros scripts.
@@ -68,6 +71,7 @@ def demodulate_ssb(waveform: np.ndarray,
         scs: Subcarrier spacing en kHz (15 o 30)
         sample_rate: Sample rate en Hz
         lmax: Número de SSB bursts a procesar (típicamente 8)
+        verbose: Mostrar información detallada del procesamiento
     
     Returns:
         dict con:
@@ -82,13 +86,18 @@ def demodulate_ssb(waveform: np.ndarray,
             - waveform_corrected: Waveform con correcciones aplicadas
     """
     # 1. Corrección de frecuencia
+    if verbose:
+        print("Corrección de frecuencia y detección PSS...")
     search_bw = 3 * scs
     waveform_corrected, freq_offset, nid2 = frequency_correction_ofdm(
-        waveform, scs, sample_rate, search_bw
+        waveform, scs, sample_rate, search_bw, verbose=verbose
     )
+    if verbose:
+        print(f"  → NID2 detectado: {nid2}")
+        print(f"  → Offset de frecuencia: {freq_offset/1e3:.3f} kHz")
     
     # 2. Estimación de timing
-    timing_offset = estimate_timing_offset(waveform_corrected, nid2, scs, sample_rate)
+    timing_offset = estimate_timing_offset(waveform_corrected, nid2, scs, sample_rate, verbose=verbose)
     waveform_aligned = waveform_corrected[timing_offset:]
     
     # 3. Demodulación OFDM del primer SSB
@@ -118,7 +127,7 @@ def demodulate_ssb(waveform: np.ndarray,
     )
     
     # 4. Detección de Cell ID
-    nid1, max_corr = detect_cell_id_sss(grid_ssb, nid2)
+    nid1, max_corr = detect_cell_id(grid_ssb, nid2, verbose=verbose)
     cell_id = 3 * nid1 + nid2
     
     # 5. Demodular todos los SSB bursts
@@ -141,7 +150,7 @@ def demodulate_ssb(waveform: np.ndarray,
             ssb_grids[:, :, i_ssb] = grid[:, :n_symbols_ssb]
     
     # 6. Detectar SSB más fuerte
-    strongest_ssb, power_db, snr_db = detect_strongest_ssb(ssb_grids, nid2, nid1, lmax)
+    strongest_ssb, power_db, snr_db = detect_strongest_ssb(ssb_grids, nid2, nid1, lmax, verbose=verbose)
     
     # 7. Crear resource grid para visualización (45 RB)
     demod_rb = 45
@@ -185,7 +194,8 @@ def demodulate_file(mat_file: str,
                    gscn: int = 7929,
                    lmax: int = 8,
                    output_folder: Optional[str] = None,
-                   save_plot: bool = True) -> Optional[Dict[str, Any]]:
+                   save_plot: bool = True,
+                   verbose: bool = False) -> Optional[Dict[str, Any]]:
     """
     Demodula un archivo .mat y opcionalmente guarda resultados.
     
@@ -196,40 +206,48 @@ def demodulate_file(mat_file: str,
         lmax: Número de SSB bursts
         output_folder: Carpeta para guardar resultados (None = no guardar)
         save_plot: Guardar imagen del resource grid
+        verbose: Mostrar información detallada del procesamiento
     
     Returns:
         Diccionario con resultados o None si falla
     """
-    print("="*70)
-    print(f"Demodulando: {Path(mat_file).name}")
-    print("="*70)
+    if verbose:
+        print("="*70)
+        print(f"Demodulando: {Path(mat_file).name}")
+        print("="*70)
     
     try:
         # Cargar waveform
         waveform = load_mat_file(mat_file)
-        print(f"✓ Waveform cargado: {len(waveform)} muestras")
+        if verbose:
+            print(f"✓ Waveform cargado: {len(waveform)} muestras")
         
         # Demodular
-        results = demodulate_ssb(waveform, scs=scs, lmax=lmax)
+        results = demodulate_ssb(waveform, scs=scs, lmax=lmax, verbose=verbose)
         
         # Añadir metadatos
         results['scs'] = scs
         results['sample_rate'] = 19.5e6
         results['gscn'] = gscn
+        results['filename'] = Path(mat_file).name
         
         # Imprimir resultados
-        print("\n" + "="*70)
-        print("RESULTADOS")
-        print("="*70)
-        print(f"Cell ID: {results['cell_id']}")
-        print(f"  NID1: {results['nid1']}")
-        print(f"  NID2: {results['nid2']}")
-        print(f"Strongest SSB: {results['strongest_ssb']}")
-        print(f"Potencia: {results['power_db']:.1f} dB")
-        print(f"SNR: {results['snr_db']:.1f} dB")
-        print(f"Freq offset: {results['freq_offset']/1e3:.3f} kHz")
-        print(f"Timing offset: {results['timing_offset']} muestras")
-        print("="*70)
+        if verbose:
+            print("\n" + "="*70)
+            print("RESULTADOS")
+            print("="*70)
+            print(f"Cell ID: {results['cell_id']}")
+            print(f"  NID1: {results['nid1']}")
+            print(f"  NID2: {results['nid2']}")
+            print(f"Strongest SSB: {results['strongest_ssb']}")
+            print(f"Potencia: {results['power_db']:.1f} dB")
+            print(f"SNR: {results['snr_db']:.1f} dB")
+            print(f"Freq offset: {results['freq_offset']/1e3:.3f} kHz")
+            print(f"Timing offset: {results['timing_offset']} muestras")
+            print("="*70)
+        else:
+            # Modo silencioso: solo una línea por archivo
+            print(f"✓ {Path(mat_file).name}: Cell ID={results['cell_id']}, SNR={results['snr_db']:.1f} dB")
         
         # Guardar resultados si se especifica carpeta
         if output_folder is not None:
@@ -241,23 +259,31 @@ def demodulate_file(mat_file: str,
                     results['cell_id'],
                     results['snr_db'],
                     output_folder=output_folder,
-                    filename=f'{file_name}_resource_grid'
+                    filename=f'{file_name}_resource_grid',
+                    verbose=verbose
                 )
             
-            save_demodulation_log(results, mat_file, output_folder, f'{file_name}_info')
+            # Solo guardar log individual en modo verbose
+            if verbose:
+                save_demodulation_log(results, mat_file, output_folder, f'{file_name}_info')
         
         return results
         
     except Exception as e:
-        print(f"\n✗ ERROR: {e}")
-        import traceback
-        traceback.print_exc()
+        error_msg = str(e)
+        if verbose:
+            print(f"\n✗ ERROR: {error_msg}")
+            import traceback
+            traceback.print_exc()
+            # En modo verbose, guardar log de error individual
+            if output_folder is not None:
+                file_name = Path(mat_file).stem
+                save_error_log(e, mat_file, output_folder, f'{file_name}_ERROR')
+        else:
+            print(f"✗ {Path(mat_file).name}: ERROR - {error_msg[:80]}")
         
-        if output_folder is not None:
-            file_name = Path(mat_file).stem
-            save_error_log(e, mat_file, output_folder, f'{file_name}_ERROR')
-        
-        return None
+        # Retornar dict con error para que se registre en el log general
+        return {'error': error_msg, 'filename': Path(mat_file).name}
 
 
 def demodulate_folder(folder_path: str,
@@ -265,7 +291,8 @@ def demodulate_folder(folder_path: str,
                      gscn: int = 7929,
                      lmax: int = 8,
                      output_folder: Optional[str] = None,
-                     pattern: str = "*.mat") -> Dict[str, Any]:
+                     pattern: str = "*.mat",
+                     verbose: bool = False) -> Dict[str, Any]:
     """
     Demodula todos los archivos .mat en una carpeta.
     
@@ -276,6 +303,7 @@ def demodulate_folder(folder_path: str,
         lmax: Número de SSB bursts
         output_folder: Carpeta para guardar resultados
         pattern: Patrón de archivos a procesar
+        verbose: Mostrar información detallada del procesamiento
     
     Returns:
         Diccionario con estadísticas y resultados
@@ -283,11 +311,20 @@ def demodulate_folder(folder_path: str,
     folder = Path(folder_path)
     mat_files = sorted(folder.glob(pattern))
     
-    print(f"Encontrados {len(mat_files)} archivos {pattern} en {folder_path}")
+    if verbose:
+        print(f"Encontrados {len(mat_files)} archivos {pattern} en {folder_path}")
+    else:
+        print(f"\nProcesando {len(mat_files)} archivos...")
     
-    results = []
+    # Inicializar log de procesamiento
+    log_file = None
+    if output_folder is not None:
+        log_file = init_processing_log(output_folder, len(mat_files))
+    
     successful = 0
     failed = 0
+    first_success = True  # Para escribir la cabecera de éxitos solo una vez
+    first_error = True  # Para escribir la cabecera de errores solo una vez
     
     for mat_file in mat_files:
         result = demodulate_file(
@@ -295,23 +332,42 @@ def demodulate_folder(folder_path: str,
             scs=scs,
             gscn=gscn,
             lmax=lmax,
-            output_folder=output_folder
+            output_folder=output_folder,
+            verbose=verbose
         )
         
         if result is not None:
-            results.append(result)
-            successful += 1
+            # Verificar si es un resultado exitoso o un error
+            if 'error' in result:
+                failed += 1
+                if log_file is not None:
+                    append_error_to_log(log_file, result['filename'], result['error'], first_error)
+                    first_error = False
+            else:
+                successful += 1
+                if log_file is not None:
+                    append_success_to_log(log_file, result, first_success)
+                    first_success = False
         else:
+            # Caso legacy por si acaso (no debería ocurrir)
             failed += 1
+            if log_file is not None:
+                append_error_to_log(log_file, mat_file.name, 'Error desconocido', first_error)
+                first_error = False
         
-        print()  # Línea en blanco entre archivos
+        if verbose:
+            print()  # Línea en blanco entre archivos solo en modo verbose
     
-    print("="*70)
+    print(f"\n{'='*70}")
     print(f"Procesamiento completado: {successful} exitosos, {failed} fallidos")
     print("="*70)
     
+    # Finalizar log de procesamiento
+    if log_file is not None:
+        finalize_processing_log(log_file, successful, failed)
+        print(f"✓ Log general guardado: {log_file}")
+    
     return {
-        'results': results,
         'successful': successful,
         'failed': failed,
         'total': len(mat_files)

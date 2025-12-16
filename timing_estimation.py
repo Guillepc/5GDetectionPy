@@ -11,7 +11,7 @@ from py3gpp.nrTimingEstimate import nrTimingEstimate
 
 
 def estimate_timing_offset(waveform: np.ndarray, nid2: int, scs: int, 
-                           sample_rate: float) -> int:
+                           sample_rate: float, verbose: bool = False) -> int:
     """
     Estimación de timing offset usando nrTimingEstimate.
     
@@ -20,11 +20,13 @@ def estimate_timing_offset(waveform: np.ndarray, nid2: int, scs: int,
         nid2: PSS ID detectado (0, 1 o 2)
         scs: Subcarrier spacing en kHz
         sample_rate: Sample rate en Hz
+        verbose: Si True, muestra información del procesamiento
     
     Returns:
         timing_offset: Offset en muestras desde el inicio del slot
     """
-    print("Estimación de timing offset...")
+    if verbose:
+        print("Estimación de timing offset...")
     
     nrb_ssb = 20
     pss_indices = nrPSSIndices()
@@ -43,6 +45,7 @@ def estimate_timing_offset(waveform: np.ndarray, nid2: int, scs: int,
         SampleRate=sample_rate
     )
     
-    print(f"  Timing offset: {timing_offset} muestras")
+    if verbose:
+        print(f"  Timing offset: {timing_offset} muestras")
     
     return timing_offset

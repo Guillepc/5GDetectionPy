@@ -15,7 +15,8 @@ def plot_resource_grid(grid_display: np.ndarray,
                        snr_db: float,
                        output_folder: Optional[str] = None,
                        filename: str = "resource_grid",
-                       show: bool = False) -> Optional[Path]:
+                       show: bool = False,
+                       verbose: bool = False) -> Optional[Path]:
     """
     Genera y guarda una visualización del resource grid.
     
@@ -26,6 +27,7 @@ def plot_resource_grid(grid_display: np.ndarray,
         output_folder: Carpeta donde guardar la imagen (None = no guardar)
         filename: Nombre base del archivo (sin extensión)
         show: Mostrar la figura en pantalla
+        verbose: Mostrar mensaje al guardar
     
     Returns:
         Path del archivo guardado o None si no se guardó
@@ -57,7 +59,8 @@ def plot_resource_grid(grid_display: np.ndarray,
         output_path.mkdir(parents=True, exist_ok=True)
         image_file = output_path / f'{filename}.png'
         plt.savefig(image_file, dpi=300, bbox_inches='tight')
-        print(f"✓ Imagen guardada: {image_file}")
+        if verbose:
+            print(f"✓ Imagen guardada: {image_file}")
     
     if show:
         plt.show()
@@ -142,3 +145,103 @@ def save_error_log(error: Exception,
     
     print(f"✓ Log de error guardado: {error_file}")
     return error_file
+
+
+def init_processing_log(output_folder: str, total_files: int,
+                        filename: str = "processing_log") -> Path:
+    """
+    Inicializa el archivo de log de procesamiento con el encabezado.
+    
+    Args:
+        output_folder: Carpeta donde guardar el log
+        total_files: Número total de archivos a procesar
+        filename: Nombre base del archivo
+    
+    Returns:
+        Path del archivo de log
+    """
+    output_path = Path(output_folder)
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    log_file = output_path / f'{filename}.txt'
+    with open(log_file, 'w') as f:
+        f.write('=' * 70 + '\n')
+        f.write('LOG DE PROCESAMIENTO\n')
+        f.write('=' * 70 + '\n')
+        f.write(f'Fecha inicio: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
+        f.write(f'Total archivos a procesar: {total_files}\n')
+        f.write('\n')
+    
+    return log_file
+
+
+def append_success_to_log(log_file: Path, result: dict, first_success: bool = False) -> None:
+    """
+    Añade un resultado exitoso al log de procesamiento.
+    
+    Args:
+        log_file: Path del archivo de log
+        result: Diccionario con los resultados de la demodulación
+        first_success: Si es el primer éxito, escribe la cabecera de la sección
+    """
+    with open(log_file, 'a') as f:
+        if first_success:
+            f.write('=' * 70 + '\n')
+            f.write('ARCHIVOS PROCESADOS EXITOSAMENTE\n')
+            f.write('=' * 70 + '\n\n')
+        
+        f.write(f"Archivo: {result.get('filename', 'N/A')}\n")
+        f.write(f"  Cell ID: {result['cell_id']}\n")
+        f.write(f"  NID1: {result['nid1']}, NID2: {result['nid2']}\n")
+        f.write(f"  Strongest SSB: {result['strongest_ssb']}\n")
+        f.write(f"  Potencia: {result['power_db']:.1f} dB\n")
+        f.write(f"  SNR: {result['snr_db']:.1f} dB\n")
+        f.write(f"  Freq offset: {result['freq_offset']/1e3:.3f} kHz\n")
+        f.write(f"  Timing offset: {result['timing_offset']} muestras\n")
+        f.write('\n')
+
+
+def append_error_to_log(log_file: Path, filename: str, error: str,
+                        first_error: bool = False) -> None:
+    """
+    Añade un error al log de procesamiento.
+    
+    Args:
+        log_file: Path del archivo de log
+        filename: Nombre del archivo que falló
+        error: Mensaje de error
+        first_error: Si es el primer error, escribe la cabecera de la sección
+    """
+    with open(log_file, 'a') as f:
+        if first_error:
+            f.write('=' * 70 + '\n')
+            f.write('ARCHIVOS CON ERRORES\n')
+            f.write('=' * 70 + '\n\n')
+        
+        f.write(f"Archivo: {filename}\n")
+        f.write(f"  Error: {error}\n")
+        f.write('\n')
+
+
+def finalize_processing_log(log_file: Path, successful: int, failed: int) -> Path:
+    """
+    Finaliza el log de procesamiento añadiendo el resumen final.
+    
+    Args:
+        log_file: Path del archivo de log
+        successful: Número de archivos procesados exitosamente
+        failed: Número de archivos fallidos
+    
+    Returns:
+        Path del archivo de log
+    """
+    with open(log_file, 'a') as f:
+        f.write('=' * 70 + '\n')
+        f.write('RESUMEN FINAL\n')
+        f.write('=' * 70 + '\n')
+        f.write(f'Fecha fin: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
+        f.write(f'Total archivos procesados: {successful + failed}\n')
+        f.write(f'Exitosos: {successful}\n')
+        f.write(f'Fallidos: {failed}\n')
+    
+    return log_file
