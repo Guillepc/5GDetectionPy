@@ -220,7 +220,9 @@ Ejemplos de uso:
         
         # Demodular
         print('\n--- Demodulando ---')
-        results = demodulate_ssb(waveform, scs=scs, sample_rate=sample_rate, verbose=False)
+        n_symbols = config.n_symbols_display
+        results = demodulate_ssb(waveform, scs=scs, sample_rate=sample_rate, 
+                                n_symbols_display=n_symbols, verbose=False)
         
         # Mostrar resultados
         print('\n=== RESULTADOS ===')

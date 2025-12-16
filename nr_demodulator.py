@@ -62,6 +62,7 @@ def demodulate_ssb(waveform: np.ndarray,
                    scs: Optional[int] = None,
                    sample_rate: Optional[float] = None,
                    lmax: int = 8,
+                   n_symbols_display: Optional[int] = None,
                    verbose: bool = False) -> Dict[str, Any]:
     """
     Demodula una señal SSB y detecta Cell ID.
@@ -72,6 +73,7 @@ def demodulate_ssb(waveform: np.ndarray,
         scs: Subcarrier spacing en kHz (15 o 30). Si None, usa config.yaml
         sample_rate: Sample rate en Hz. Si None, usa config.yaml
         lmax: Número de SSB bursts a procesar (típicamente 8)
+        n_symbols_display: Número de símbolos OFDM a demodular (6-14). Si None, usa config.yaml
         verbose: Mostrar información detallada del procesamiento
     
     Returns:
@@ -94,6 +96,8 @@ def demodulate_ssb(waveform: np.ndarray,
         scs = config.scs
     if sample_rate is None:
         sample_rate = config.sample_rate
+    if n_symbols_display is None:
+        n_symbols_display = config.n_symbols_display
     
     # 1. Corrección de frecuencia
     if verbose:
@@ -172,17 +176,13 @@ def demodulate_ssb(waveform: np.ndarray,
         SampleRate=sample_rate
     )
     
-    # Rellenar con ceros para tener siempre 54 símbolos (escala consistente)
+    # Extraer solo los símbolos solicitados desde config
     n_subcarriers = grid_full.shape[0]
     n_symbols_available = grid_full.shape[1]
-    target_symbols = 54
+    target_symbols = min(n_symbols_display, n_symbols_available)
     
-    if n_symbols_available < target_symbols:
-        # Rellenar con ceros hasta completar 54 símbolos
-        grid_display = np.zeros((n_subcarriers, target_symbols), dtype=grid_full.dtype)
-        grid_display[:, :n_symbols_available] = grid_full
-    else:
-        grid_display = grid_full[:, :target_symbols]
+    # Tomar los símbolos disponibles hasta el target
+    grid_display = grid_full[:, :target_symbols]
     
     return {
         'cell_id': cell_id,
@@ -241,8 +241,9 @@ def demodulate_file(mat_file: str,
         if verbose:
             print(f"✓ Waveform cargado: {len(waveform)} muestras")
         
-        # Demodular
-        results = demodulate_ssb(waveform, scs=scs, lmax=lmax, verbose=verbose)
+        # Demodular (n_symbols_display se toma de config si no se especifica)
+        results = demodulate_ssb(waveform, scs=scs, lmax=lmax, 
+                                n_symbols_display=None, verbose=verbose)
         
         # Añadir metadatos
         results['scs'] = scs
