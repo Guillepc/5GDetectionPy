@@ -177,7 +177,7 @@ def hssb_burst_frequency_correct_ofdm(waveform: np.ndarray, scs: int, sample_rat
 def estimate_timing_offset(waveform: np.ndarray, nid2: int, scs: int, 
                            sample_rate: float) -> int:
     """
-    Estimación de timing offset usando correlación PSS.
+    Estimación de timing offset usando nrTimingEstimate con ajuste para símbolos 1-4.
     """
     print("Estimación de timing offset...")
     
@@ -185,12 +185,26 @@ def estimate_timing_offset(waveform: np.ndarray, nid2: int, scs: int,
     pss_indices = nrPSSIndices()
     pss_seq = nrPSS(nid2)
     
-    # Correlación directa con PSS
-    corr = scipy_signal.correlate(waveform[:min(len(waveform), 400000)], 
-                                 pss_seq, mode='valid')
-    timing_offset = int(np.argmax(np.abs(corr)))
+    # Crear refGrid con PSS en el símbolo 2 (0-indexed: símbolo 1)
+    # MATLAB: refGrid = zeros([nrbSSB*12 2]); refGrid(nrPSSIndices, 2) = nrPSS(NID2);
+    ref_grid = np.zeros((nrb_ssb * 12, 2), dtype=complex)
+    ref_grid[pss_indices.astype(int), 1] = pss_seq  # Símbolo 1 (0-indexed)
     
-    print(f"  Timing offset: {timing_offset} muestras")
+    # Usar nrTimingEstimate como MATLAB
+    timing_offset = nrTimingEstimate(
+        waveform=waveform,
+        nrb=nrb_ssb,
+        scs=scs,
+        initialNSlot=0,
+        refGrid=ref_grid,
+        SampleRate=sample_rate
+    )
+    
+    print(f"  Timing offset (nrTimingEstimate): {timing_offset} muestras")
+    
+    # MATLAB usa el timing offset directamente sin ajustes
+    # El SSB aparecerá en símbolos 1-4 del grid (0-indexed)
+    print(f"  Timing offset aplicado: {timing_offset} muestras")
     
     return timing_offset
 
@@ -331,9 +345,10 @@ def demodulate_single(mat_file: str, scs: int = 30, gscn: int = 7929,
         # 3. Estimación de timing offset
         timing_offset = estimate_timing_offset(waveform_corrected, nid2, scs, sample_rate)
         
-        # 4. Alinear al inicio del SSB burst
-        ssb_start = timing_offset
-        waveform_aligned = waveform_corrected[ssb_start:]
+        # 4. Aplicar timing offset (como MATLAB: correctedWaveform = correctedWaveform(1+timingOffset:end))
+        # MATLAB aplica directamente el offset sin ajustes adicionales
+        waveform_aligned = waveform_corrected[timing_offset:]
+        print(f"  Waveform alineada desde muestra {timing_offset}")
         
         # 5. Demodular OFDM
         print("Demodulación OFDM del SSB burst...")
@@ -378,7 +393,7 @@ def demodulate_single(mat_file: str, scs: int = 30, gscn: int = 7929,
         samples_per_ssb = int(sample_rate * 0.02 / lmax)
         
         for i_ssb in range(lmax):
-            start_idx = ssb_start + i_ssb * samples_per_ssb
+            start_idx = i_ssb * samples_per_ssb
             if start_idx + samples_per_ssb <= len(waveform_corrected):
                 wf_ssb = waveform_corrected[start_idx:start_idx + samples_per_ssb]
                 grid = nrOFDMDemodulate(
@@ -396,63 +411,56 @@ def demodulate_single(mat_file: str, scs: int = 30, gscn: int = 7929,
         # 8. Detectar SSB más fuerte
         strongest_ssb, power_db, snr_db = detect_strongest_ssb(ssb_grids, nid2, nid1, lmax)
         
-        # 9. Crear grid expandido para visualización (como MATLAB)
-        # MATLAB demodula 45 RB y centra el SSB de 20 RB
-        print("\nCreando grid expandido para visualización (45 RB)...")
-        demod_rb = 45  # MATLAB usa 45 RBs
+        # 9. Crear resource grid para visualización (como MATLAB)
+        print("\nCreando resource grid para visualización...")
+        demod_rb = 45  # MATLAB usa 45 RBs para visualización
         
-        # Calcular offset de frecuencia para centrar SSB
-        ssb_freq_origin = 12 * (demod_rb - nrb_ssb) // 2  # 150 subportadoras
-        
-        # Demodular más waveform para tener ~54 símbolos
-        # Para SCS=30kHz: 1 slot = 14 símbolos = 0.5ms
-        # Necesitamos ~4 slots para 56 símbolos
-        samples_per_slot = int(sample_rate * 0.0005)  # 0.5ms
-        num_slots = 4
-        waveform_for_display = waveform_aligned[:num_slots * samples_per_slot]
-        
-        # Demodular con 20 RB (que sabemos que funciona)
+        # Usar nrOFDMDemodulate directamente (como MATLAB)
+        # MATLAB: gridSSB1 = nrOFDMDemodulate(correctedWaveform, demodRB, scsNumeric, nSlot, SampleRate=sampleRate);
         try:
-            grid_20rb = nrOFDMDemodulate(
-                waveform=waveform_for_display,
-                nrb=nrb_ssb,
+            grid_full = nrOFDMDemodulate(
+                waveform=waveform_aligned,
+                nrb=demod_rb,
                 scs=scs,
                 initialNSlot=0,
-                CyclicPrefix='normal',
-                Nfft=nfft_ssb,
                 SampleRate=sample_rate
             )
             
-            # Limitar a 54 símbolos
-            last_symbol = min(54, grid_20rb.shape[1])
-            grid_20rb = grid_20rb[:, :last_symbol]
+            # Tomar primeros 54 símbolos como MATLAB
+            max_symbols = min(54, grid_full.shape[1])
+            grid_display = grid_full[:, :max_symbols]  # Shape: (subcarriers, symbols)
             
-            # Crear grid expandido (45 RB × símbolos)
-            grid_expanded = np.zeros((demod_rb * 12, grid_20rb.shape[1]), dtype=complex)
-            
-            # Insertar grid de 20 RB centrado
-            grid_expanded[ssb_freq_origin:ssb_freq_origin + nrb_ssb * 12, :] = grid_20rb
-            
-            grid_display = grid_expanded
-            print(f"  Grid expandido creado: {grid_display.shape}")
+            print(f"  Resource grid creado (nrOFDMDemodulate): {grid_display.shape}")
+            print(f"  Símbolos demodulados: {max_symbols}")
             
         except Exception as e:
-            print(f"  Warning: Error en demodulación extendida: {e}")
-            # Fallback: usar concatenación de SSB bursts
-            num_ssb_to_concat = min(lmax, 8)
-            grid_ssb_concat = np.concatenate([ssb_grids[:, :, i] for i in range(num_ssb_to_concat)], axis=1)
+            print(f"  Error en nrOFDMDemodulate: {e}")
+            print(f"  Usando método alternativo (concatenación SSB)...")
             
-            grid_expanded = np.zeros((demod_rb * 12, grid_ssb_concat.shape[1]), dtype=complex)
-            grid_expanded[ssb_freq_origin:ssb_freq_origin + nrb_ssb * 12, :] = grid_ssb_concat
+            # Fallback: concatenar SSB bursts
+            num_ssb_repeat = 2
+            ssb_grids_concat = []
+            for _ in range(num_ssb_repeat):
+                for i in range(lmax):
+                    ssb_grids_concat.append(ssb_grids[:, :, i])
             
-            last_symbol = min(54, grid_expanded.shape[1])
-            grid_display = grid_expanded[:, :last_symbol]
-            print(f"  Grid expandido creado (fallback): {grid_display.shape}")
+            grid_20rb_extended = np.concatenate(ssb_grids_concat, axis=1)
+            last_symbol = min(54, grid_20rb_extended.shape[1])
+            grid_20rb_trimmed = grid_20rb_extended[:, :last_symbol]
+            
+            ssb_freq_origin = 12 * (demod_rb - nrb_ssb) // 2
+            grid_display = np.zeros((demod_rb * 12, last_symbol), dtype=complex)
+            grid_display[ssb_freq_origin:ssb_freq_origin + nrb_ssb * 12, :] = grid_20rb_trimmed
+            
+            print(f"  Resource grid creado (método alternativo): {grid_display.shape}")
         
-        # Definir rectángulo del SSB (primeros 4 símbolos)
-        start_symbol = 0  # 0-indexed
-        num_symbols_ssb = 4
-        ssb_rect = (start_symbol, ssb_freq_origin, num_symbols_ssb, 12 * nrb_ssb)
+        # Calcular posición del SSB en el grid de 45 RB
+        ssb_freq_origin = 12 * (demod_rb - nrb_ssb) // 2
+        print(f"  SSB centrado en subportadoras: {ssb_freq_origin} - {ssb_freq_origin + nrb_ssb * 12 - 1}")
+        print(f"  SSB visible en símbolos 1-4 (0-indexed)")
+        
+        # No marcar con rectángulo ni leyenda (SSB es claramente visible)
+        ssb_rect = None
         
         # 10. Guardar imagen y log si se especifica carpeta de salida
         if output_folder is not None:
@@ -469,23 +477,6 @@ def demodulate_single(mat_file: str, scs: int = 30, gscn: int = 7929,
             ax.set_ylabel('Subportadoras')
             ax.set_title(f'Resource Grid - Cell ID: {cell_id}, SNR: {snr_db:.1f} dB')
             plt.colorbar(im, ax=ax, label='Magnitud')
-            
-            # Dibujar rectángulo del SSB si está disponible
-            if ssb_rect is not None:
-                from matplotlib.patches import Rectangle
-                rect = Rectangle(
-                    (ssb_rect[0], ssb_rect[1]),  # (x, y)
-                    ssb_rect[2], ssb_rect[3],     # width, height
-                    linewidth=2, edgecolor='white', facecolor='none'
-                )
-                ax.add_patch(rect)
-                
-                # Añadir texto con información del SSB más fuerte
-                text_x = ssb_rect[0] + ssb_rect[2] / 2
-                text_y = ssb_rect[1] + ssb_rect[3] / 2
-                ax.text(text_x, text_y, f'Strongest SSB: {strongest_ssb}',
-                       color='white', fontsize=10, ha='center', va='center', weight='bold',
-                       bbox=dict(boxstyle='round', facecolor='black', alpha=0.7))
             
             image_file = output_path / f'{file_name}_resource_grid.png'
             plt.savefig(image_file, dpi=150, bbox_inches='tight')
@@ -564,7 +555,7 @@ if __name__ == '__main__':
     import sys
     
     # Archivo de prueba
-    test_file = '5GDetection/capturas_disco_con/timestamp_20251210_120747_292.mat'
+    test_file = '5GDetection/capturas_disco_sin/timestamp_20251210_120401_686.mat'
     output_folder = 'resource_grids_output'  # Carpeta por defecto
     
     if len(sys.argv) > 1:
