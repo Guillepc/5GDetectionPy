@@ -1,3 +1,5 @@
 env/
 5GDetection/
 __pycache__/
+test_samples/
+results/
