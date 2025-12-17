@@ -80,6 +80,21 @@ def main():
         help='Mostrar ejes y etiquetas en las imágenes (por defecto sin ejes)'
     )
     
+    parser.add_argument(
+        '--threads',
+        type=int,
+        default=4,
+        help='Número de threads para procesamiento paralelo (default: 4)'
+    )
+    
+    parser.add_argument(
+        '--export',
+        type=str,
+        default='images',
+        choices=['images', 'csv', 'both'],
+        help='Formato de exportación: images (resource grids), csv (datos demodulados), o both (default: images)'
+    )
+    
     args = parser.parse_args()
     
     input_path = Path(args.input)
@@ -87,6 +102,10 @@ def main():
     if not input_path.exists():
         print(f"✗ Error: No existe {args.input}")
         sys.exit(1)
+    
+    # Determinar si guardar imágenes o CSV según --export
+    save_plot = (args.export in ['images', 'both']) and not args.no_plot
+    save_csv = (args.export in ['csv', 'both'])
     
     # Procesar archivo o carpeta
     if input_path.is_file():
@@ -96,7 +115,8 @@ def main():
             gscn=args.gscn,
             lmax=args.lmax,
             output_folder=args.output,
-            save_plot=not args.no_plot,
+            save_plot=save_plot,
+            save_csv=save_csv,
             verbose=args.verbose,
             show_axes=args.show_axes
         )
@@ -117,8 +137,11 @@ def main():
             lmax=args.lmax,
             output_folder=args.output,
             pattern=args.pattern,
+            save_plot=save_plot,
+            save_csv=save_csv,
             verbose=args.verbose,
-            show_axes=args.show_axes
+            show_axes=args.show_axes,
+            num_threads=args.threads
         )
         
         if summary['successful'] > 0:

@@ -7,6 +7,8 @@ import numpy as np
 from pathlib import Path
 from typing import Optional, Dict, Any
 import warnings
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 
 from scipy.io import loadmat
 from py3gpp.nrOFDMDemodulate import nrOFDMDemodulate
@@ -205,6 +207,7 @@ def demodulate_file(mat_file: str,
                    lmax: int = 8,
                    output_folder: Optional[str] = None,
                    save_plot: bool = True,
+                   save_csv: bool = False,
                    verbose: bool = False,
                    show_axes: bool = False) -> Optional[Dict[str, Any]]:
     """
@@ -284,6 +287,10 @@ def demodulate_file(mat_file: str,
                     show_axes=show_axes
                 )
             
+            if save_csv:
+                from visualization import save_demodulation_csv
+                save_demodulation_csv(results, mat_file, output_folder, f'{file_name}_data')
+            
             # Solo guardar log individual en modo verbose
             if verbose:
                 save_demodulation_log(results, mat_file, output_folder, f'{file_name}_info')
@@ -313,8 +320,11 @@ def demodulate_folder(folder_path: str,
                      lmax: int = 8,
                      output_folder: Optional[str] = None,
                      pattern: str = "*.mat",
+                     save_plot: bool = True,
+                     save_csv: bool = False,
                      verbose: bool = False,
-                     show_axes: bool = False) -> Dict[str, Any]:
+                     show_axes: bool = False,
+                     num_threads: int = 4) -> Dict[str, Any]:
     """
     Demodula todos los archivos .mat en una carpeta.
     
@@ -356,38 +366,95 @@ def demodulate_folder(folder_path: str,
     first_success = True  # Para escribir la cabecera de éxitos solo una vez
     first_error = True  # Para escribir la cabecera de errores solo una vez
     
-    for mat_file in mat_files:
+    # Lock para escritura thread-safe en consola y logs
+    print_lock = Lock()
+    log_lock = Lock()
+    
+    def process_single_file(mat_file):
+        """Función auxiliar para procesar un archivo en un thread."""
         result = demodulate_file(
             str(mat_file),
             scs=scs,
             gscn=gscn,
             lmax=lmax,
             output_folder=output_folder,
+            save_plot=save_plot,
+            save_csv=save_csv,
             verbose=verbose,
             show_axes=show_axes
         )
-        
-        if result is not None:
-            # Verificar si es un resultado exitoso o un error
-            if 'error' in result:
+        return mat_file, result
+    
+    # Procesamiento paralelo con ThreadPoolExecutor
+    if num_threads > 1:
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            # Enviar todos los trabajos
+            futures = {executor.submit(process_single_file, mat_file): mat_file 
+                      for mat_file in mat_files}
+            
+            # Procesar resultados a medida que se completan
+            for future in as_completed(futures):
+                mat_file, result = future.result()
+                
+                with log_lock:
+                    if result is not None:
+                        # Verificar si es un resultado exitoso o un error
+                        if 'error' in result:
+                            failed += 1
+                            if log_file is not None:
+                                append_error_to_log(log_file, result['filename'], result['error'], first_error)
+                                first_error = False
+                        else:
+                            successful += 1
+                            if log_file is not None:
+                                append_success_to_log(log_file, result, first_success)
+                                first_success = False
+                    else:
+                        # Caso legacy por si acaso (no debería ocurrir)
+                        failed += 1
+                        if log_file is not None:
+                            append_error_to_log(log_file, mat_file.name, 'Error desconocido', first_error)
+                            first_error = False
+                
+                if verbose:
+                    with print_lock:
+                        print()  # Línea en blanco entre archivos solo en modo verbose
+    else:
+        # Procesamiento secuencial (1 thread)
+        for mat_file in mat_files:
+            result = demodulate_file(
+                str(mat_file),
+                scs=scs,
+                gscn=gscn,
+                lmax=lmax,
+                output_folder=output_folder,
+                save_plot=save_plot,
+                save_csv=save_csv,
+                verbose=verbose,
+                show_axes=show_axes
+            )
+            
+            if result is not None:
+                # Verificar si es un resultado exitoso o un error
+                if 'error' in result:
+                    failed += 1
+                    if log_file is not None:
+                        append_error_to_log(log_file, result['filename'], result['error'], first_error)
+                        first_error = False
+                else:
+                    successful += 1
+                    if log_file is not None:
+                        append_success_to_log(log_file, result, first_success)
+                        first_success = False
+            else:
+                # Caso legacy por si acaso (no debería ocurrir)
                 failed += 1
                 if log_file is not None:
-                    append_error_to_log(log_file, result['filename'], result['error'], first_error)
+                    append_error_to_log(log_file, mat_file.name, 'Error desconocido', first_error)
                     first_error = False
-            else:
-                successful += 1
-                if log_file is not None:
-                    append_success_to_log(log_file, result, first_success)
-                    first_success = False
-        else:
-            # Caso legacy por si acaso (no debería ocurrir)
-            failed += 1
-            if log_file is not None:
-                append_error_to_log(log_file, mat_file.name, 'Error desconocido', first_error)
-                first_error = False
-        
-        if verbose:
-            print()  # Línea en blanco entre archivos solo en modo verbose
+            
+            if verbose:
+                print()  # Línea en blanco entre archivos solo en modo verbose
     
     print(f"\n{'='*70}")
     print(f"Procesamiento completado: {successful} exitosos, {failed} fallidos")

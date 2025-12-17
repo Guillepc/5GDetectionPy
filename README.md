@@ -38,18 +38,89 @@ processing:
 
 ### 1. Procesamiento de archivos .mat (CLI)
 
+#### Uso básico
+
 ```bash
-# Procesar archivo (usa config.yaml)
+# Procesar archivo individual
 python demodulate_cli.py captura.mat -o resultados/
+
+# Procesar carpeta completa
+python demodulate_cli.py carpeta/ -o resultados/
 
 # Sobreescribir parámetros de config.yaml
 python demodulate_cli.py captura.mat -o resultados/ --scs 15 --gscn 7880
 
-# Procesar carpeta completa
-python demodulate_cli.py carpeta/ -o resultados/ --pattern "*.mat"
-
-# Ver opciones
+# Ver todas las opciones
 python demodulate_cli.py --help
+```
+
+#### Procesamiento paralelo (múltiples threads)
+
+El CLI utiliza **procesamiento paralelo por defecto** (4 threads) para optimizar el tiempo al procesar múltiples archivos:
+
+```bash
+# Usar 4 threads (default, ~40% más rápido que secuencial)
+python demodulate_cli.py carpeta/ -o resultados/
+
+# Usar 8 threads para carpetas grandes
+python demodulate_cli.py carpeta/ -o resultados/ --threads 8
+
+# Procesamiento secuencial (1 thread)
+python demodulate_cli.py carpeta/ -o resultados/ --threads 1
+```
+
+**Nota**: El procesamiento paralelo solo se activa al procesar carpetas desde la CLI. Al importar las funciones desde otro script Python (`demodulate_file`, `demodulate_ssb`), el procesamiento es siempre secuencial.
+
+#### Formatos de exportación
+
+Controla qué archivos se generan con `--export`:
+
+```bash
+# Solo imágenes PNG del resource grid (default)
+python demodulate_cli.py carpeta/ -o resultados/
+
+# Solo archivos CSV con datos demodulados
+python demodulate_cli.py carpeta/ -o resultados/ --export csv
+
+# Imágenes y CSV simultáneamente
+python demodulate_cli.py carpeta/ -o resultados/ --export both
+```
+
+**Formatos disponibles**:
+- `images` (default): Genera `<archivo>_resource_grid.png` (visualización 540×54, 300 DPI)
+- `csv`: Genera `<archivo>_data.csv` con:
+  - Metadatos: Cell ID, NID1/NID2, SNR, potencia, offsets
+  - Resource grid completo: magnitud de cada subportadora × símbolo OFDM
+  - Compatible con Excel, pandas, MATLAB
+- `both`: Genera PNG + CSV
+
+#### Opciones avanzadas
+
+```bash
+# Patrón específico de archivos
+python demodulate_cli.py carpeta/ -o resultados/ --pattern "timestamp_*.mat"
+
+# Modo verbose (logs detallados por archivo)
+python demodulate_cli.py carpeta/ -o resultados/ --verbose
+
+# Imágenes con ejes y etiquetas
+python demodulate_cli.py carpeta/ -o resultados/ --show-axes
+
+# Sin imágenes (equivalente a --export csv)
+python demodulate_cli.py carpeta/ -o resultados/ --no-plot
+```
+
+#### Ejemplo completo
+
+```bash
+# Procesamiento optimizado: 8 threads, CSV + imágenes, patrón específico
+python demodulate_cli.py test_samples/presence/ \
+    -o resultados_presencia/ \
+    --export both \
+    --threads 8 \
+    --pattern "timestamp_*.mat" \
+    --scs 30 \
+    --gscn 7929
 ```
 
 ### 2. Uso programático (API)
@@ -133,11 +204,23 @@ python monitoreo_continuo.py --simulate
 
 ## Salida
 
-Al procesar archivos se generan:
+Al procesar archivos se generan (según opciones):
 
+### Archivos generados con `--export images` (default)
 - `<archivo>_resource_grid.png` - Visualización del resource grid (540×54, 300 DPI)
-- `<archivo>_info.txt` - Log con Cell ID, NID1/NID2, SNR, potencia, offsets
-- `<archivo>_ERROR.txt` - Log de errores (si ocurren)
+- `<archivo>_info.txt` - Log individual (solo en modo `--verbose`)
+- `<archivo>_ERROR.txt` - Log de errores (si ocurren en modo `--verbose`)
+- `processing_log.txt` - Resumen completo con todos los archivos procesados
+
+### Archivos generados con `--export csv`
+- `<archivo>_data.csv` - Datos demodulados en CSV:
+  - Metadatos: Cell ID, NID1, NID2, SNR, potencia, offsets, etc.
+  - Resource grid completo: magnitud de cada subportadora × símbolo OFDM
+  - Compatible con Excel, pandas, MATLAB, etc.
+- `processing_log.txt` - Resumen completo del procesamiento
+
+### Archivos generados con `--export both`
+- Todos los archivos anteriores (PNG + CSV + logs)
 
 ## Parámetros
 
@@ -147,13 +230,15 @@ Todos los scripts usan `config.yaml` por defecto. Los argumentos CLI sobreescrib
 
 | Parámetro | Descripción | Default |
 |-----------|-------------|---------|
-| `--scs` | Subcarrier spacing (kHz) | config.yaml (30) |
+| `--scs` | Subcarrier spacing (kHz: 15 o 30) | config.yaml (30) |
 | `--gscn` | GSCN del canal | config.yaml (7929) |
 | `--lmax` | Número de SSB bursts | 8 |
-| `--pattern` | Patrón de archivos | `*.mat` |
-| `--verbose` | Modo detallado | False |
-| `--show-axes` | Imágenes con ejes | False |
-| `--no-plot` | No guardar imágenes | False |
+| `--pattern` | Patrón de archivos para carpetas | `*.mat` |
+| `--threads` | Número de threads para procesamiento paralelo | 4 |
+| `--export` | Formato de salida: `images`, `csv`, `both` | `images` |
+| `--verbose` | Modo detallado con logs individuales | False |
+| `--show-axes` | Imágenes con ejes y etiquetas | False |
+| `--no-plot` | No guardar imágenes (deprecado, usar `--export csv`) | False |
 
 ### captura_simple.py
 
