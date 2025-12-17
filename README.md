@@ -66,33 +66,69 @@ waveform = ...  # numpy array complejo desde SDR
 resultado = demodulate_ssb(waveform, scs=30, sample_rate=19.5e6, lmax=8)
 ```
 
-### 3. Captura en tiempo real con USRP B210
+### 3. Captura simple con USRP B210
+
+Script simplificado para captura rápida, demodulación y visualización con ejes:
+
+```bash
+# Captura simple (usa config.yaml)
+python captura_simple.py
+
+# Con GSCN específico
+python captura_simple.py --gscn 7880
+
+# Listar dispositivos USRP
+python captura_simple.py --list-devices
+
+# Seleccionar dispositivo
+python captura_simple.py --device-index 0
+python captura_simple.py --device-serial 12345678
+
+# Ajustar ganancia y duración
+python captura_simple.py --gain 40 --duration 0.05
+```
+
+**Características**:
+- Una sola captura (no guarda archivos)
+- Visualización con ejes (X: símbolos OFDM, Y: subportadoras)
+- Logs moderados (no verbosos)
+- Ideal para testing rápido
+
+### 4. Monitoreo continuo con USRP B210
+
+Para capturas múltiples y monitoreo prolongado:
 
 ```bash
 # Listar dispositivos USRP
 python monitoreo_continuo.py --list-devices
 
-# Captura y procesamiento en tiempo real
+# Captura y procesamiento continuo
 python monitoreo_continuo.py --config config.yaml
 
 # Modo simulación (sin hardware)
 python monitoreo_continuo.py --simulate
 ```
 
+**Características**:
+- Múltiples capturas con intervalo configurable
+- Visualización con slider temporal
+- Guardado opcional de resultados
+- Control completo de parámetros
+
 ## Estructura del proyecto
 
 ```
 5GDetectionPy/
-├── nr_demodulator.py           # API principal
-├── frequency_correction.py     # Corrección de frecuencia
-├── timing_estimation.py        # Estimación de timing
-├── cell_detection.py           # Detección de Cell ID
+├── nr_demodulator.py           # API principal de demodulación
+├── frequency_correction.py     # Corrección de offset de frecuencia
+├── timing_estimation.py        # Estimación de timing offset
+├── cell_detection.py           # Detección de Cell ID y SSB
 ├── visualization.py            # Visualización y logging
-├── demodulate_cli.py           # CLI
-├── monitoreo_continuo.py       # Captura en tiempo real USRP
-├── quick_start.py              # Ejemplos rápidos
-├── live_example.py             # Ejemplos de integración
-└── config.yaml                 # Configuración USRP
+├── config_loader.py            # Carga de configuración YAML
+├── demodulate_cli.py           # CLI para archivos .mat
+├── captura_simple.py           # Captura rápida con USRP
+├── monitoreo_continuo.py       # Monitoreo continuo USRP
+└── config.yaml                 # Configuración centralizada
 ```
 
 ## Salida
@@ -103,18 +139,33 @@ Al procesar archivos se generan:
 - `<archivo>_info.txt` - Log con Cell ID, NID1/NID2, SNR, potencia, offsets
 - `<archivo>_ERROR.txt` - Log de errores (si ocurren)
 
-## Parámetros CLI
+## Parámetros
 
-Todos los parámetros son opcionales y sobreescriben los valores de `config.yaml`:
+Todos los scripts usan `config.yaml` por defecto. Los argumentos CLI sobreescriben estos valores.
 
-| Parámetro | Descripción | Default (config.yaml) |
-|-----------|-------------|-------------|
-| `--scs` | Subcarrier spacing (kHz) | 30 |
-| `--gscn` | Global Sync Channel Number | 7929 |
+### demodulate_cli.py
+
+| Parámetro | Descripción | Default |
+|-----------|-------------|---------|
+| `--scs` | Subcarrier spacing (kHz) | config.yaml (30) |
+| `--gscn` | GSCN del canal | config.yaml (7929) |
 | `--lmax` | Número de SSB bursts | 8 |
 | `--pattern` | Patrón de archivos | `*.mat` |
-| `--verbose` | Modo detallado | False (silencioso) |
-| `--show-axes` | Imágenes con ejes | False (sin ejes) |
+| `--verbose` | Modo detallado | False |
+| `--show-axes` | Imágenes con ejes | False |
+| `--no-plot` | No guardar imágenes | False |
+
+### captura_simple.py
+
+| Parámetro | Descripción | Default |
+|-----------|-------------|---------|
+| `--device-index` | Índice dispositivo USRP | Auto |
+| `--device-serial` | Serial dispositivo USRP | Auto |
+| `--gscn` | GSCN del canal | config.yaml (7929) |
+| `--scs` | Subcarrier spacing (kHz) | config.yaml (30) |
+| `--gain` | Ganancia receptor (dB) | config.yaml (50) |
+| `--duration` | Duración captura (s) | 0.02 |
+| `--list-devices` | Listar dispositivos USRP | - |
 
 ## Troubleshooting
 
