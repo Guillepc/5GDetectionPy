@@ -231,6 +231,10 @@ Ejemplos de uso:
                         help='Intervalo entre capturas en segundos (default: 0.1)')
     parser.add_argument('--no-gui', action='store_true',
                         help='Sin visualización gráfica (solo logs en consola)')
+    parser.add_argument('--save-images', action='store_true',
+                        help='Guardar imágenes del resource grid periódicamente')
+    parser.add_argument('--save-interval', type=int, default=10,
+                        help='Guardar imagen cada N frames (default: 10)')
     
     args = parser.parse_args()
     
@@ -284,20 +288,59 @@ Ejemplos de uso:
             interval=args.interval
         )
         
-        if args.no_gui:
-            # Modo sin GUI - solo logs en consola
-            print('\n=== CAPTURA CONTINUA (Ctrl+C para detener) ===\n')
+        if args.no_gui or args.save_images:
+            # Modo sin GUI - solo logs en consola (opcionalmente guardando imágenes)
+            print('\n=== CAPTURA CONTINUA (Ctrl+C para detener) ===')
+            if args.save_images:
+                print(f'💾 Guardando imágenes cada {args.save_interval} frames en carpeta "captures/"\n')
+                Path('captures').mkdir(exist_ok=True)
+            else:
+                print()
+            
             try:
                 while True:
-                    capturer.process_frame()
+                    results = capturer.process_frame()
+                    
+                    # Guardar imagen periódicamente si está habilitado
+                    if args.save_images and results is not None and capturer.capture_count % args.save_interval == 0:
+                        fig, ax = plt.subplots(figsize=(12, 8))
+                        grid = results['grid_display']
+                        im = ax.imshow(np.abs(grid), aspect='auto', cmap='jet',
+                                      origin='lower', interpolation='nearest')
+                        plt.colorbar(im, ax=ax, label='Magnitude')
+                        ax.set_xlabel('OFDM Symbol')
+                        ax.set_ylabel('Subcarrier')
+                        
+                        ssb_detected = results.get('cell_id', -1) >= 0
+                        if ssb_detected:
+                            ax.set_title(f'Frame #{capturer.capture_count} - Cell ID: {results["cell_id"]}, '
+                                       f'SNR: {results["snr_db"]:.1f} dB, SSB: {results["strongest_ssb"]}')
+                        else:
+                            ax.set_title(f'Frame #{capturer.capture_count} - Sin SSB detectado')
+                        
+                        plt.tight_layout()
+                        filename = f'captures/frame_{capturer.capture_count:04d}.png'
+                        plt.savefig(filename, dpi=100)
+                        plt.close()
+                        print(f'  💾 Guardado: {filename}')
+                    
                     time.sleep(args.interval)
             except KeyboardInterrupt:
                 print(f'\n\n✓ Capturados {capturer.capture_count} frames')
                 if capturer.capture_times:
                     avg_time = np.mean(capturer.capture_times) * 1000
                     print(f'✓ Tiempo promedio de captura: {avg_time:.2f} ms')
+                if args.save_images:
+                    print(f'✓ Imágenes guardadas en carpeta "captures/"')
         else:
             # Modo con GUI - visualización animada
+            # Verificar si hay display disponible
+            import os
+            if 'DISPLAY' not in os.environ or not os.environ['DISPLAY']:
+                print('\n⚠ No hay display disponible. Usa --no-gui o --save-images')
+                print('  O conéctate con: ssh -X usuario@host\n')
+                return
+            
             print('\n=== INICIANDO VISUALIZACIÓN (Cierra ventana para detener) ===\n')
             
             # Crear figura
