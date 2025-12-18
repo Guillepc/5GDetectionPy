@@ -161,13 +161,14 @@ class ContinuousCapture:
             waveform, capture_time = self.capture_one_frame()
             self.capture_count += 1
             
-            # Demodular
+            # Demodular (modo rápido para captura continua)
             results = demodulate_ssb(
                 waveform, 
                 scs=self.scs, 
                 sample_rate=self.sample_rate,
                 n_symbols_display=self.n_symbols,
-                verbose=False
+                verbose=False,
+                fast_mode=False  # Omite procesamiento de 8 SSB bursts
             )
             
             # Verificar si se detectó SSB válido
@@ -181,16 +182,17 @@ class ContinuousCapture:
             
             if ssb_detected:
                 print(f'[{timestamp}] Frame #{self.capture_count:3d} | '
-                      f'Captura: {capture_time*1000:.1f}ms | '
-                      f'✓ SSB DETECTADO | '
+                      f'Cap: {capture_time*1000:.1f}ms | ', end="")
+                # demodulate_ssb imprime [Demod: Xms] aquí
+                print(f'| ✓ SSB | '
                       f'Cell ID: {results["cell_id"]:4d} | '
-                      f'SSB: {results["strongest_ssb"]} | '
                       f'SNR: {results["snr_db"]:5.1f}dB | '
                       f'Pwr: {results["power_db"]:5.1f}dB')
             else:
                 print(f'[{timestamp}] Frame #{self.capture_count:3d} | '
-                      f'Captura: {capture_time*1000:.1f}ms | '
-                      f'⊗ Sin SSB (grid vacío o débil)')
+                      f'Cap: {capture_time*1000:.1f}ms | ', end="")
+                # demodulate_ssb imprime [Demod: Xms] aquí
+                print(f'| ⊗ Sin SSB')
             
             return results
             
@@ -226,9 +228,9 @@ Ejemplos de uso:
                         help='Subcarrier spacing en kHz (default: desde config.yaml)')
     parser.add_argument('--gain', type=float,
                         help='Ganancia del receptor en dB (default: desde config.yaml)')
-    parser.add_argument('--duration', type=float, default=0.015,
-                        help='Duración de captura en segundos (default: 0.005)')
-    parser.add_argument('--interval', type=float, default=0.01,
+    parser.add_argument('--duration', type=float, default=0.02,
+                        help='Duración de captura en segundos (default: 0.02)')
+    parser.add_argument('--interval', type=float, default=0.1,
                         help='Intervalo entre capturas en segundos (default: 0.1)')
     parser.add_argument('--no-gui', action='store_true',
                         help='Sin visualización gráfica (solo logs en consola)')

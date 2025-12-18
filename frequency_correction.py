@@ -124,3 +124,54 @@ def frequency_correction_ofdm(waveform: np.ndarray, scs: int, sample_rate: float
     waveform_corrected = waveform * np.exp(-1j * 2 * np.pi * freq_offset * t)
     
     return waveform_corrected, freq_offset, best_nid2
+
+def frequency_correction_ofdm_fast(waveform: np.ndarray, scs: int, sample_rate: float, 
+                                 search_bw: float = 100e3, verbose: bool = False) -> Tuple[np.ndarray, float, int]:
+    """
+    VERSIÓN RÁPIDA para captura continua: reduce búsqueda y longitud de señal.
+    """
+    # Usar solo 4ms de señal para CFO (suficiente para PSS)
+    max_len_cfo = int(sample_rate * 0.004)
+    short_waveform = waveform[:max_len_cfo]
+    t_short = np.arange(len(short_waveform)) / sample_rate
+    
+    # Reducir búsqueda: solo ±100kHz, paso 15kHz (no hace falta precisión extrema cada frame)
+    fshifts = np.arange(-search_bw//2, search_bw//2 + 1, 15e3)  # ~14 shifts en vez de 180
+    
+    peak_values = np.zeros((len(fshifts), 3))
+    
+    sync_nfft = 256
+    sync_sr = sync_nfft * scs * 1000  # 7.68MHz
+    
+    # Precalcular TODAS las referencias una vez
+    ref_waveforms = [_get_cached_ref_waveform(nid2, scs, sync_sr, sync_nfft) for nid2 in range(3)]
+    
+    if verbose:
+        print(f"  Fast CFO: {len(fshifts)} shifts × 3 NID2 sobre {len(short_waveform)/1e3:.0f}ksamples")
+    
+    for f_idx, f_shift in enumerate(fshifts):
+        # Corrección rápida
+        corrected = short_waveform * np.exp(-1j * 2 * np.pi * f_shift * t_short)
+        
+        # Resample UNA VEZ por freq (sigue siendo bottleneck pero con señal 5x más corta)
+        num_samples_ds = int(len(corrected) * sync_sr / sample_rate)
+        waveform_ds = resample(corrected, num_samples_ds)
+        
+        # Correlacionar con las 3 referencias
+        for nid2 in range(3):
+            corr = oaconvolve(waveform_ds, np.conj(ref_waveforms[nid2][::-1]), mode='valid')
+            peak_values[f_idx, nid2] = np.max(np.abs(corr))
+    
+    # Detectar mejor pico
+    best_f_idx, best_nid2 = np.unravel_index(np.argmax(peak_values), peak_values.shape)
+    freq_offset = fshifts[best_f_idx]
+    
+    # Aplicar corrección a la señal ORIGINAL COMPLETA
+    t_full = np.arange(len(waveform)) / sample_rate
+    waveform_corrected = waveform * np.exp(-1j * 2 * np.pi * freq_offset * t_full)
+    
+    if verbose:
+        print(f"  → Fast CFO: {freq_offset/1e3:.1f}kHz, NID2={best_nid2}")
+    
+    return waveform_corrected, freq_offset, best_nid2
+

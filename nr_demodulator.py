@@ -12,6 +12,7 @@ from threading import Lock
 
 from scipy.io import loadmat
 from py3gpp.nrOFDMDemodulate import nrOFDMDemodulate
+import time
 
 try:
     import h5py
@@ -21,6 +22,7 @@ except ImportError:
     warnings.warn("h5py not available. Only .mat v7 and earlier can be read.")
 
 from frequency_correction import frequency_correction_ofdm
+from frequency_correction import frequency_correction_ofdm_fast
 from timing_estimation import estimate_timing_offset
 from cell_detection import detect_cell_id, detect_strongest_ssb
 from visualization import (plot_resource_grid, save_demodulation_log, save_error_log,
@@ -65,62 +67,60 @@ def demodulate_ssb(waveform: np.ndarray,
                    sample_rate: Optional[float] = None,
                    lmax: int = 8,
                    n_symbols_display: Optional[int] = None,
-                   verbose: bool = False) -> Dict[str, Any]:
+                   verbose: bool = False,
+                   fast_mode: bool = False) -> Dict[str, Any]:
     """
     Demodulates an SSB signal and detects Cell ID.
     Main function for use from other scripts.
-    
-    Args:
-        waveform: Captured IQ signal
-        scs: Subcarrier spacing in kHz (15 or 30). If None, uses config.yaml
-        sample_rate: Sample rate in Hz. If None, uses config.yaml
-        lmax: Number of SSB bursts to process (typically 8)
-        n_symbols_display: Number of OFDM symbols to demodulate (6-14). If None, uses config.yaml
-        verbose: Display detailed processing information
-    
-    Returns:
-        dict with:
-            - cell_id: Detected Physical Cell ID
-            - nid1, nid2: Cell ID components
-            - strongest_ssb: Index of the strongest SSB
-            - power_db: Power in dB
-            - snr_db: Estimated SNR in dB
-            - freq_offset: Frequency offset in Hz
-            - timing_offset: Timing offset in samples
-            - grid_display: Resource grid for visualization (540×54)
-            - waveform_corrected: Waveform with corrections applied
     """
-    # Load configuration
+    t0_total = time.perf_counter()
+
     config = get_config()
-    
-    # Use config values if not specified
+
     if scs is None:
         scs = config.scs
     if sample_rate is None:
         sample_rate = config.sample_rate
     if n_symbols_display is None:
         n_symbols_display = config.n_symbols_display
-    
-    # 1. Frequency correction
+
+    # 1) Corrección de frecuencia
+    t0 = time.perf_counter()
     if verbose:
         print("Frequency correction and PSS detection...")
-    search_bw = config.search_bw  # In kHz from config.yaml
-    waveform_corrected, freq_offset, nid2 = frequency_correction_ofdm(
-        waveform, scs, sample_rate, search_bw, verbose=verbose
-    )
+    search_bw = config.search_bw
+
+    if fast_mode:
+        waveform_corrected, freq_offset, nid2 = frequency_correction_ofdm_fast(
+            waveform, scs, sample_rate, search_bw, verbose=verbose  # ← Añade search_bw
+        )
+    else:
+        waveform_corrected, freq_offset, nid2 = frequency_correction_ofdm(
+            waveform, scs, sample_rate, search_bw, verbose=verbose
+        )
+    t1 = time.perf_counter()
     if verbose:
         print(f"  → Detected NID2: {nid2}")
         print(f"  → Frequency offset: {freq_offset/1e3:.3f} kHz")
-    
-    # 2. Timing estimation
-    timing_offset = estimate_timing_offset(waveform_corrected, nid2, scs, sample_rate, verbose=verbose)
+
+    # 2) Estimación de timing
+    timing_offset = estimate_timing_offset(
+        waveform_corrected, nid2, scs, sample_rate, verbose=verbose
+    )
+    t2 = time.perf_counter()
     waveform_aligned = waveform_corrected[timing_offset:]
-    
-    # 3. OFDM demodulation of the first SSB
+
+    # En modo rápido, recortar a una ventana corta (5 ms) para TODO
+    if fast_mode:
+        max_len = int(sample_rate * 0.005)  # 5 ms
+        if len(waveform_aligned) > max_len:
+            waveform_aligned = waveform_aligned[:max_len]
+
+    # 3) Demodulación OFDM del primer SSB
     nrb_ssb = config.nrb_ssb
     n_symbols_ssb = 4
     nfft_ssb = 256
-    
+
     mu = (scs // 15) - 1
     cp_lengths = np.zeros(14, dtype=int)
     for i in range(14):
@@ -128,10 +128,10 @@ def demodulate_ssb(waveform: np.ndarray,
             cp_lengths[i] = int((144 * 2**(-mu) + 16) * (sample_rate / 30.72e6))
         else:
             cp_lengths[i] = int((144 * 2**(-mu)) * (sample_rate / 30.72e6))
-    
+
     samples_per_ssb = sum([nfft_ssb + cp_lengths[i] for i in range(n_symbols_ssb)])
     waveform_ssb = waveform_aligned[:samples_per_ssb]
-    
+
     grid_ssb = nrOFDMDemodulate(
         waveform=waveform_ssb,
         nrb=nrb_ssb,
@@ -141,51 +141,104 @@ def demodulate_ssb(waveform: np.ndarray,
         Nfft=nfft_ssb,
         SampleRate=sample_rate
     )
-    
-    # 4. Cell ID detection
+    t3 = time.perf_counter()
+
+    # 4) Detección de Cell ID
     nid1, max_corr = detect_cell_id(grid_ssb, nid2, verbose=verbose)
+    t4 = time.perf_counter()
     cell_id = 3 * nid1 + nid2
-    
-    # 5. Demodulate all SSB bursts
-    ssb_grids = np.zeros((nrb_ssb * 12, n_symbols_ssb, lmax), dtype=complex)
-    samples_per_ssb_period = int(sample_rate * 0.02 / lmax)
-    
-    for i_ssb in range(lmax):
-        start_idx = i_ssb * samples_per_ssb_period
-        if start_idx + samples_per_ssb_period <= len(waveform_corrected):
-            wf_ssb = waveform_corrected[start_idx:start_idx + samples_per_ssb_period]
-            grid = nrOFDMDemodulate(
-                waveform=wf_ssb,
-                nrb=nrb_ssb,
-                scs=scs,
-                initialNSlot=0,
-                CyclicPrefix='normal',
-                Nfft=nfft_ssb,
-                SampleRate=sample_rate
-            )
-            ssb_grids[:, :, i_ssb] = grid[:, :n_symbols_ssb]
-    
-    # 6. Detect strongest SSB
-    strongest_ssb, power_db, snr_db = detect_strongest_ssb(ssb_grids, nid2, nid1, lmax, verbose=verbose)
-    
-    # 7. Create resource grid for visualization (45 RB)
+
+    # 5) Procesado de todos los SSB (omitido en fast_mode)
+    if fast_mode:
+        strongest_ssb = 0
+        power_linear = np.mean(np.abs(grid_ssb) ** 2)
+        power_db = 10 * np.log10(power_linear + 1e-12)
+        pss_indices = list(range(56, 183))
+        signal_power = np.mean(np.abs(grid_ssb[pss_indices, 0]) ** 2)
+        noise_indices = list(range(0, 56)) + list(range(183, 240))
+        noise_power = np.mean(np.abs(grid_ssb[noise_indices, :]) ** 2)
+        snr_db = 10 * np.log10((signal_power / (noise_power + 1e-12)) + 1e-12)
+        t5 = t4
+        t6 = t4
+    else:
+        ssb_grids = np.zeros((nrb_ssb * 12, n_symbols_ssb, lmax), dtype=complex)
+        samples_per_ssb_period = int(sample_rate * 0.02 / lmax)
+
+        for i_ssb in range(lmax):
+            start_idx = i_ssb * samples_per_ssb_period
+            if start_idx + samples_per_ssb_period <= len(waveform_corrected):
+                wf_ssb = waveform_corrected[start_idx:start_idx + samples_per_ssb_period]
+                grid = nrOFDMDemodulate(
+                    waveform=wf_ssb,
+                    nrb=nrb_ssb,
+                    scs=scs,
+                    initialNSlot=0,
+                    CyclicPrefix='normal',
+                    Nfft=nfft_ssb,
+                    SampleRate=sample_rate
+                )
+                ssb_grids[:, :, i_ssb] = grid[:, :n_symbols_ssb]
+
+        t5 = time.perf_counter()
+        strongest_ssb, power_db, snr_db = detect_strongest_ssb(
+            ssb_grids, nid2, nid1, lmax, verbose=verbose
+        )
+        t6 = time.perf_counter()
+
+    # 6) Grid de visualización
     demod_rb = config.nrb_demod
+    if fast_mode:
+        # En modo rápido usa la misma ventana recortada (5 ms)
+        wf_for_grid = waveform_aligned
+    else:
+        wf_for_grid = waveform_aligned
+
     grid_full = nrOFDMDemodulate(
-        waveform=waveform_aligned,
+        waveform=wf_for_grid,
         nrb=demod_rb,
         scs=scs,
         initialNSlot=0,
         SampleRate=sample_rate
     )
-    
-    # Extract only requested symbols from config
-    n_subcarriers = grid_full.shape[0]
+    t7 = time.perf_counter()
+
     n_symbols_available = grid_full.shape[1]
     target_symbols = min(n_symbols_display, n_symbols_available)
-    
-    # Take available symbols up to target
     grid_display = grid_full[:, :target_symbols]
-    
+
+    t8_total = time.perf_counter()
+    total_time = (t8_total - t0_total) * 1000
+
+    # Desglose detallado SIEMPRE para depurar
+    if fast_mode:
+        # En fast_mode no hay bucle de SSB bursts
+        grid_full_time = (t7 - t4) * 1000
+        print(
+            "demodulate_ssb timings (fast): "
+            f"freq_corr={(t1 - t0)*1000:.1f}ms, "
+            f"timing={(t2 - t1)*1000:.1f}ms, "
+            f"ssb_demod={(t3 - t2)*1000:.1f}ms, "
+            f"cell_id={(t4 - t3)*1000:.1f}ms, "
+            f"grid_full={grid_full_time:.1f}ms, "
+            f"total={total_time:.1f}ms"
+        )
+    else:
+        ssb_bursts_time = (t5 - t4) * 1000
+        strongest_ssb_time = (t6 - t5) * 1000
+        grid_full_time = (t7 - t6) * 1000
+        print(
+            "demodulate_ssb timings: "
+            f"freq_corr={(t1 - t0)*1000:.1f}ms, "
+            f"timing={(t2 - t1)*1000:.1f}ms, "
+            f"ssb_demod={(t3 - t2)*1000:.1f}ms, "
+            f"cell_id={(t4 - t3)*1000:.1f}ms, "
+            f"ssb_bursts={ssb_bursts_time:.1f}ms, "
+            f"strongest_ssb={strongest_ssb_time:.1f}ms, "
+            f"grid_full={grid_full_time:.1f}ms, "
+            f"total={total_time:.1f}ms"
+        )
+
+
     return {
         'cell_id': cell_id,
         'nid1': nid1,
@@ -199,6 +252,8 @@ def demodulate_ssb(waveform: np.ndarray,
         'grid_display': grid_display,
         'waveform_corrected': waveform_corrected
     }
+
+
 
 
 def demodulate_file(mat_file: str, 
