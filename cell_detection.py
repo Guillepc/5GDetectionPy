@@ -12,6 +12,42 @@ from py3gpp.nrExtractResources import nrExtractResources
 from py3gpp.nrPBCHDMRS import nrPBCHDMRS
 from py3gpp.nrPBCHDMRSIndices import nrPBCHDMRSIndices
 
+# Global cache for sequences
+_SSS_CACHE = {}
+_PBCH_DMRS_CACHE = {}
+_SSS_INDICES_CACHE = None
+_PBCH_DMRS_INDICES_CACHE = {}
+
+
+def _get_cached_sss(cell_id: int) -> np.ndarray:
+    """Get or compute SSS sequence for a given cell ID."""
+    if cell_id not in _SSS_CACHE:
+        _SSS_CACHE[cell_id] = nrSSS(cell_id)
+    return _SSS_CACHE[cell_id]
+
+
+def _get_cached_sss_indices() -> np.ndarray:
+    """Get or compute SSS indices (constant)."""
+    global _SSS_INDICES_CACHE
+    if _SSS_INDICES_CACHE is None:
+        _SSS_INDICES_CACHE = nrSSSIndices().astype(int)
+    return _SSS_INDICES_CACHE
+
+
+def _get_cached_pbch_dmrs(cell_id: int, i_ssb: int) -> np.ndarray:
+    """Get or compute PBCH DMRS sequence."""
+    key = (cell_id, i_ssb)
+    if key not in _PBCH_DMRS_CACHE:
+        _PBCH_DMRS_CACHE[key] = nrPBCHDMRS(cell_id, i_ssb)
+    return _PBCH_DMRS_CACHE[key]
+
+
+def _get_cached_pbch_dmrs_indices(cell_id: int) -> np.ndarray:
+    """Get or compute PBCH DMRS indices."""
+    if cell_id not in _PBCH_DMRS_INDICES_CACHE:
+        _PBCH_DMRS_INDICES_CACHE[cell_id] = nrPBCHDMRSIndices(cell_id)
+    return _PBCH_DMRS_INDICES_CACHE[cell_id]
+
 
 def detect_cell_id(ssb_grid: np.ndarray, nid2: int, verbose: bool = False) -> Tuple[int, float]:
     """
@@ -29,13 +65,13 @@ def detect_cell_id(ssb_grid: np.ndarray, nid2: int, verbose: bool = False) -> Tu
     if verbose:
         print("Cell ID detection (SSS)...")
     
-    sss_indices = nrSSSIndices().astype(int)
+    sss_indices = _get_cached_sss_indices()
     sss_rx = nrExtractResources(sss_indices, ssb_grid)
     
     correlations = np.zeros(336)
     for nid1 in range(336):
         cell_id = 3 * nid1 + nid2
-        sss_ref = nrSSS(cell_id)
+        sss_ref = _get_cached_sss(cell_id)
         correlation = sss_rx * np.conj(sss_ref)
         correlations[nid1] = np.sum(np.abs(correlation)**2)
     
@@ -71,8 +107,8 @@ def detect_strongest_ssb(ssb_grids: np.ndarray, nid2: int, nid1: int,
         print(f"Strongest SSB detection (Lmax={lmax})...")
     
     cell_id = 3 * nid1 + nid2
-    sss_indices = nrSSSIndices()
-    pbch_dmrs_indices = nrPBCHDMRSIndices(cell_id)
+    sss_indices = _get_cached_sss_indices()
+    pbch_dmrs_indices = _get_cached_pbch_dmrs_indices(cell_id)
     
     powers = np.zeros(lmax)
     snrs = np.zeros(lmax)
@@ -87,7 +123,7 @@ def detect_strongest_ssb(ssb_grids: np.ndarray, nid2: int, nid1: int,
         # SNR usando PBCH-DMRS
         try:
             dmrs_rx = nrExtractResources(pbch_dmrs_indices, grid)
-            dmrs_ref = nrPBCHDMRS(cell_id, i_ssb)
+            dmrs_ref = _get_cached_pbch_dmrs(cell_id, i_ssb)
             
             if len(dmrs_rx) > 0 and len(dmrs_ref) > 0:
                 h_est = dmrs_rx / dmrs_ref

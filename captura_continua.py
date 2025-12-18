@@ -6,6 +6,7 @@ Captura señales continuamente y actualiza el resource grid en tiempo real.
 
 import uhd
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import argparse
@@ -340,6 +341,18 @@ Ejemplos de uso:
                 print('\n⚠ No hay display disponible. Usa --no-gui o --save-images')
                 print('  O conéctate con: ssh -X usuario@host\n')
                 return
+            
+            # Configurar backend interactivo de matplotlib
+            try:
+                matplotlib.use('TkAgg')
+            except ImportError:
+                try:
+                    matplotlib.use('Qt5Agg')
+                except ImportError:
+                    print('\n⚠ No se encontró backend interactivo (TkAgg o Qt5Agg)')
+                    print('  Instala: sudo apt-get install python3-tk')
+                    print('  O usa: --no-gui para modo sin visualización\n')
+                    return
             
             print('\n=== INICIANDO VISUALIZACIÓN (Cierra ventana para detener) ===\n')
             

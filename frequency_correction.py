@@ -4,12 +4,52 @@ Frequency correction module for 5G NR signals.
 """
 
 import numpy as np
-from scipy import signal as scipy_signal
+from scipy.signal import resample, oaconvolve
 from typing import Tuple
 
 from py3gpp.nrPSS import nrPSS
 from py3gpp.nrPSSIndices import nrPSSIndices
 from py3gpp.nrOFDMModulate import nrOFDMModulate
+
+# Global cache for PSS sequences, indices, and reference grids
+_PSS_CACHE = {}
+_PSS_INDICES_CACHE = None
+_REF_GRID_CACHE = {}
+_REF_WAVEFORM_CACHE = {}
+
+
+def _get_cached_pss(nid2: int) -> np.ndarray:
+    """Get or compute PSS sequence for a given NID2."""
+    if nid2 not in _PSS_CACHE:
+        _PSS_CACHE[nid2] = nrPSS(nid2)
+    return _PSS_CACHE[nid2]
+
+
+def _get_cached_pss_indices() -> np.ndarray:
+    """Get or compute PSS indices (constant)."""
+    global _PSS_INDICES_CACHE
+    if _PSS_INDICES_CACHE is None:
+        _PSS_INDICES_CACHE = nrPSSIndices()
+    return _PSS_INDICES_CACHE
+
+
+def _get_cached_ref_waveform(nid2: int, scs: int, sync_sr: float, sync_nfft: int) -> np.ndarray:
+    """Get or compute reference waveform for a given NID2 and parameters."""
+    key = (nid2, scs, sync_sr, sync_nfft)
+    if key not in _REF_WAVEFORM_CACHE:
+        nrb_ssb = 20
+        pss_indices = _get_cached_pss_indices()
+        ref_grid = np.zeros((nrb_ssb * 12, 4), dtype=complex)
+        ref_grid[pss_indices, 0] = _get_cached_pss(nid2)
+        ref_waveform, _ = nrOFDMModulate(
+            grid=ref_grid,
+            scs=scs,
+            initialNSlot=0,
+            SampleRate=sync_sr,
+            Nfft=sync_nfft
+        )
+        _REF_WAVEFORM_CACHE[key] = ref_waveform
+    return _REF_WAVEFORM_CACHE[key]
 
 
 def frequency_correction_ofdm(waveform: np.ndarray, scs: int, sample_rate: float, 
@@ -35,15 +75,6 @@ def frequency_correction_ofdm(waveform: np.ndarray, scs: int, sample_rate: float
     # Synchronization parameters
     sync_nfft = 256
     sync_sr = sync_nfft * scs * 1000  # 256 * 30 * 1000 = 7.68 MHz
-    nrb_ssb = 20  # SSB is 20 RBs = 240 subcarriers
-    
-    # PSS indices
-    pss_indices = nrPSSIndices()
-    
-    # Create reference grids for the 3 NID2
-    ref_grids = np.zeros((nrb_ssb * 12, 4, 3), dtype=complex)
-    for nid2 in range(3):
-        ref_grids[pss_indices, 0, nid2] = nrPSS(nid2)
     
     # Coarse and fine search
     coarse_fshifts = np.arange(-search_bw, search_bw + scs, scs) * 1e3 / 2
@@ -60,22 +91,15 @@ def frequency_correction_ofdm(waveform: np.ndarray, scs: int, sample_rate: float
     for f_idx, f_shift in enumerate(fshifts):
         waveform_corrected = waveform * np.exp(-1j * 2 * np.pi * f_shift * t)
         num_samples_ds = int(len(waveform_corrected) * sync_sr / sample_rate)
-        waveform_ds = scipy_signal.resample(waveform_corrected, num_samples_ds)
+        waveform_ds = resample(waveform_corrected, num_samples_ds)
         
         for nid2 in range(3):
             try:
-                ref_grid_nid2 = ref_grids[:, :, nid2]
-                ref_waveform, _ = nrOFDMModulate(
-                    grid=ref_grid_nid2,
-                    scs=scs,
-                    initialNSlot=0,
-                    SampleRate=sync_sr,
-                    Nfft=sync_nfft
-                )
+                ref_waveform = _get_cached_ref_waveform(nid2, scs, sync_sr, sync_nfft)
                 
                 max_samples = min(len(waveform_ds), 300000)
-                corr = scipy_signal.correlate(waveform_ds[:max_samples], 
-                                            ref_waveform, mode='valid')
+                corr = oaconvolve(waveform_ds[:max_samples], 
+                                 np.conj(ref_waveform[::-1]), mode='valid')
                 peak_values[f_idx, nid2] = np.max(np.abs(corr))
             except Exception as e:
                 peak_values[f_idx, nid2] = 0

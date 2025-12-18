@@ -9,6 +9,25 @@ from py3gpp.nrPSS import nrPSS
 from py3gpp.nrPSSIndices import nrPSSIndices
 from py3gpp.nrTimingEstimate import nrTimingEstimate
 
+# Global cache for PSS sequences and indices
+_PSS_CACHE = {}
+_PSS_INDICES_CACHE = None
+
+
+def _get_cached_pss(nid2: int) -> np.ndarray:
+    """Get or compute PSS sequence for a given NID2."""
+    if nid2 not in _PSS_CACHE:
+        _PSS_CACHE[nid2] = nrPSS(nid2)
+    return _PSS_CACHE[nid2]
+
+
+def _get_cached_pss_indices() -> np.ndarray:
+    """Get or compute PSS indices (constant)."""
+    global _PSS_INDICES_CACHE
+    if _PSS_INDICES_CACHE is None:
+        _PSS_INDICES_CACHE = nrPSSIndices()
+    return _PSS_INDICES_CACHE
+
 
 def estimate_timing_offset(waveform: np.ndarray, nid2: int, scs: int, 
                            sample_rate: float, verbose: bool = False) -> int:
@@ -29,8 +48,8 @@ def estimate_timing_offset(waveform: np.ndarray, nid2: int, scs: int,
         print("Timing offset estimation...")
     
     nrb_ssb = 20
-    pss_indices = nrPSSIndices()
-    pss_seq = nrPSS(nid2)
+    pss_indices = _get_cached_pss_indices()
+    pss_seq = _get_cached_pss(nid2)
     
     # Create refGrid with PSS in symbol 2 (0-indexed: symbol 1)
     ref_grid = np.zeros((nrb_ssb * 12, 2), dtype=complex)
