@@ -261,17 +261,17 @@ def save_demodulation_csv(results: Dict[str, Any],
                           output_folder: str,
                           filename: str = "data") -> Path:
     """
-    Guarda los datos demodulados en formato CSV.
-    Incluye metadatos y el resource grid completo.
+    Saves demodulation data in CSV format.
+    Includes metadata and the complete resource grid.
     
     Args:
-        results: Diccionario con resultados de demodulación
-        mat_file: Ruta del archivo .mat procesado
-        output_folder: Carpeta donde guardar el CSV
-        filename: Nombre base del archivo (sin extensión)
+        results: Dictionary with demodulation results
+        mat_file: Path of the processed .mat file
+        output_folder: Folder where the CSV will be saved
+        filename: Base name of the file (without extension)
     
     Returns:
-        Path del archivo guardado
+        Path of the saved file
     """
     output_path = Path(output_folder)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -281,15 +281,15 @@ def save_demodulation_csv(results: Dict[str, Any],
     with open(csv_file, 'w', newline='') as f:
         writer = csv.writer(f)
         
-        # Escribir metadatos como cabecera
-        writer.writerow(['# METADATOS DE DEMODULACIÓN'])
-        writer.writerow(['Archivo', mat_file])
-        writer.writerow(['Fecha', datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
+        # Write metadata as header
+        writer.writerow(['# DEMODULATION DATA'])
+        writer.writerow(['File', mat_file])
+        writer.writerow(['Date', datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
         writer.writerow(['Cell ID', results['cell_id']])
         writer.writerow(['NID1', results['nid1']])
         writer.writerow(['NID2', results['nid2']])
         writer.writerow(['Strongest SSB', results['strongest_ssb']])
-        writer.writerow(['Potencia (dB)', f"{results['power_db']:.2f}"])
+        writer.writerow(['Power (dB)', f"{results['power_db']:.2f}"])
         writer.writerow(['SNR (dB)', f"{results['snr_db']:.2f}"])
         writer.writerow(['Freq Offset (Hz)', f"{results['freq_offset']:.2f}"])
         writer.writerow(['Timing Offset (samples)', results['timing_offset']])
@@ -301,21 +301,21 @@ def save_demodulation_csv(results: Dict[str, Any],
         if 'gscn' in results:
             writer.writerow(['GSCN', results['gscn']])
         
-        writer.writerow([])  # Línea en blanco
+        writer.writerow([])  # Blank line
         
-        # Escribir resource grid si está disponible
+        # Write resource grid if available
         if 'grid_display' in results:
             grid = results['grid_display']
             writer.writerow(['# RESOURCE GRID'])
-            writer.writerow(['# Dimensiones', f"{grid.shape[0]} subportadoras x {grid.shape[1]} símbolos OFDM"])
-            writer.writerow(['# Formato', 'Cada fila = subportadora, cada columna = símbolo OFDM'])
+            writer.writerow(['# Dimensions', f"{grid.shape[0]} subcarriers x {grid.shape[1]} OFDM symbols"])
+            writer.writerow(['# Format', 'Each row = subcarrier, each column = OFDM symbol'])
             writer.writerow([])
             
-            # Cabecera con índices de símbolos
-            header = ['Subportadora'] + [f'Símbolo_{i}' for i in range(grid.shape[1])]
+            # Header with symbol indices
+            header = ['Subcarrier'] + [f'Symbol_{i}' for i in range(grid.shape[1])]
             writer.writerow(header)
             
-            # Escribir magnitud de cada elemento del resource grid
+            # Write magnitude of each element of the resource grid
             for i in range(grid.shape[0]):
                 row = [f'SC_{i}'] + [f"{np.abs(grid[i, j]):.6f}" for j in range(grid.shape[1])]
                 writer.writerow(row)

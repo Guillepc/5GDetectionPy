@@ -44,7 +44,7 @@ def load_csv_file(csv_file: str, verbose: bool = False):
                     continue
                 
                 # Metadata section
-                if row[0] == '# METADATOS DE DEMODULACIÓN' or row[0] == '# DEMODULATION METADATA':
+                if row[0] == '# DEMODULATION METADATA':
                     in_metadata = True
                     continue
                 
@@ -74,8 +74,8 @@ def load_csv_file(csv_file: str, verbose: bool = False):
                     if row[0].startswith('#'):
                         continue
                     
-                    # Skip header row (Subportadora, Símbolo_0, ...)
-                    if row[0] in ['Subportadora', 'Subcarrier']:
+                    # Skip header row (Subcarrier, Symbol_0, ...)
+                    if row[0] in ['Subcarrier']:
                         continue
                     
                     # Parse data rows (SC_0, value1, value2, ...)
