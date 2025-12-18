@@ -123,7 +123,37 @@ python demodulate_cli.py test_samples/presence/ \
     --gscn 7929
 ```
 
-### 2. Programmatic usage (API)
+### 2. CSV to Image Converter
+
+Convert previously generated CSV files back to resource grid images:
+
+```bash
+# Convert single CSV file
+python csv_to_image.py results/file_data.csv -o images/
+
+# Convert entire folder with 4 threads (default)
+python csv_to_image.py results/ -o images/
+
+# Convert with 8 threads for faster processing
+python csv_to_image.py results/ -o images/ --threads 8
+
+# Generate images with axes and labels
+python csv_to_image.py results/ -o images/ --show-axes
+
+# Verbose mode (detailed information)
+python csv_to_image.py results/ -o images/ --verbose
+
+# View all options
+python csv_to_image.py --help
+```
+
+**Features**:
+- Parallel processing (default: 4 threads)
+- Reads metadata and resource grid from CSV
+- Generates identical images to original demodulation
+- Images without axes by default (use `--show-axes` to add them)
+
+### 3. Programmatic usage (API)
 
 ```python
 from nr_demodulator import demodulate_file, demodulate_ssb
@@ -137,7 +167,7 @@ waveform = ...  # complex numpy array from SDR
 result = demodulate_ssb(waveform, scs=30, sample_rate=19.5e6, lmax=8)
 ```
 
-### 3. Simple capture with USRP B210
+### 4. Simple capture with USRP B210
 
 Simplified script for quick capture, demodulation and visualization with axes:
 
@@ -165,7 +195,7 @@ python captura_simple.py --gain 40 --duration 0.05
 - Moderate logs (not verbose)
 - Ideal for quick testing
 
-### 4. Continuous monitoring with USRP B210
+### 5. Continuous monitoring with USRP B210
 
 For multiple captures and prolonged monitoring:
 
@@ -197,6 +227,7 @@ python monitoreo_continuo.py --simulate
 ├── visualization.py            # Visualization and logging
 ├── config_loader.py            # YAML configuration loader
 ├── demodulate_cli.py           # CLI for .mat files
+├── csv_to_image.py             # CSV to image converter
 ├── captura_simple.py           # Quick capture with USRP
 ├── monitoreo_continuo.py       # Continuous USRP monitoring
 └── config.yaml                 # Centralized configuration
@@ -229,7 +260,7 @@ All scripts use `config.yaml` by default. CLI arguments override these values.
 ### demodulate_cli.py
 
 | Parameter | Description | Default |
-|-----------|-------------|---------||
+|-----------|-------------|---------|
 | `--scs` | Subcarrier spacing (kHz: 15 or 30) | config.yaml (30) |
 | `--gscn` | Channel GSCN | config.yaml (7929) |
 | `--lmax` | Number of SSB bursts | 8 |
@@ -241,6 +272,15 @@ All scripts use `config.yaml` by default. CLI arguments override these values.
 | `--no-plot` | Don't save images (deprecated, use `--export csv`) | False |
 | `--profile` | Enable profiling to measure execution times | False |
 | `--profile-output` | Save profiling result to file | None |
+
+### csv_to_image.py
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `--pattern` | File pattern for folders | `*.csv` |
+| `--threads` | Number of threads for parallel processing | 4 |
+| `--show-axes` | Images with axes and labels | False |
+| `--verbose` | Detailed mode with processing information | False |
 
 ### captura_simple.py
 
