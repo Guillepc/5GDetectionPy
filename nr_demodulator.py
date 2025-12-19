@@ -68,10 +68,15 @@ def demodulate_ssb(waveform: np.ndarray,
                    lmax: int = 8,
                    n_symbols_display: Optional[int] = None,
                    verbose: bool = False,
-                   fast_mode: bool = False) -> Dict[str, Any]:
+                   fast_mode: bool = False,
+                   ssb_expected_position_ms: Optional[float] = None) -> Dict[str, Any]:
     """
     Demodulates an SSB signal and detects Cell ID.
     Main function for use from other scripts.
+    
+    Args:
+        ssb_expected_position_ms: En fast_mode, posición esperada del SSB en ms.
+                                  Si es None, procesa desde el inicio.
     """
     t0_total = time.perf_counter()
 
@@ -110,9 +115,10 @@ def demodulate_ssb(waveform: np.ndarray,
     t2 = time.perf_counter()
     waveform_aligned = waveform_corrected[timing_offset:]
 
-    # En modo rápido, recortar a una ventana corta (5 ms) para TODO
+    # En modo rápido, procesar solo ventana de 10ms desde el inicio
+    # (después de timing_offset, el SSB está al principio)
     if fast_mode:
-        max_len = int(sample_rate * 0.005)  # 5 ms
+        max_len = int(sample_rate * 0.010)  # 10ms
         if len(waveform_aligned) > max_len:
             waveform_aligned = waveform_aligned[:max_len]
 
@@ -239,6 +245,9 @@ def demodulate_ssb(waveform: np.ndarray,
         )
 
 
+    # Calcular posición absoluta del SSB en la captura original
+    ssb_absolute_position_ms = (timing_offset / sample_rate) * 1000.0
+    
     return {
         'cell_id': cell_id,
         'nid1': nid1,
@@ -248,6 +257,7 @@ def demodulate_ssb(waveform: np.ndarray,
         'snr_db': snr_db,
         'freq_offset': freq_offset,
         'timing_offset': timing_offset,
+        'ssb_absolute_position_ms': ssb_absolute_position_ms,  # Para tracking
         'sss_correlation': max_corr,
         'grid_display': grid_display,
         'waveform_corrected': waveform_corrected

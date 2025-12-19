@@ -18,6 +18,7 @@ from datetime import datetime
 from config_loader import get_config
 from nr_demodulator import demodulate_ssb
 from visualization import plot_resource_grid
+from ssb_tracker import SSBTracker
 
 
 def list_usrp_devices():
@@ -97,9 +98,24 @@ class ContinuousCapture:
         self.sample_rate = sample_rate
         self.gain = gain
         self.scs = scs
-        self.duration = duration
+        self.initial_duration = duration
         self.n_symbols = n_symbols
         self.interval = interval
+        
+        # Inicializar SSB Tracker (optimizado con sincronización temporal)
+        self.ssb_tracker = SSBTracker(
+            sample_rate=sample_rate,
+            ssb_period_ms=20.0,
+            tracking_window_before_ms=3.0,   # 3ms antes del SSB
+            tracking_window_after_ms=7.0,    # 7ms después del SSB (10ms total)
+            max_tracking_failures=8,         # Mayor tolerancia a fallos
+            min_snr_threshold=-20.0,         # Umbral SNR más permisivo
+            enable_multi_cell=True,          # Permitir tracking de múltiples celdas
+            min_confidence_for_tracking=2    # 2 detecciones consecutivas para confirmar celda
+        )
+        
+        # Duración dinámica controlada por tracker
+        self.duration = self.ssb_tracker.get_capture_duration()
         
         # Configurar USRP
         self.usrp.set_rx_rate(sample_rate, 0)
@@ -129,7 +145,11 @@ class ContinuousCapture:
         print(f'  Antena: {self.usrp.get_rx_antenna(0)}')
     
     def capture_one_frame(self):
-        """Captura un frame de señal."""
+        """Captura un frame de señal (duración dinámica según tracker)."""
+        # Actualizar duración según estado del tracker
+        self.duration = self.ssb_tracker.get_capture_duration()
+        self.num_samples = int(self.duration * self.sample_rate)
+        
         samples = np.zeros(self.num_samples, dtype=np.complex64)
         
         stream_cmd = uhd.types.StreamCMD(uhd.types.StreamMode.num_done)
@@ -155,21 +175,45 @@ class ContinuousCapture:
         return samples, capture_duration
     
     def process_frame(self):
-        """Captura y procesa un frame."""
+        """Captura y procesa un frame con tracking inteligente y sincronización temporal."""
         try:
-            # Capturar
+            # Sincronización temporal: esperar hasta próximo SSB burst
+            sync_delay = self.ssb_tracker.get_sync_delay()
+            if sync_delay > 0.001:  # Solo si es significativo (>1ms)
+                time.sleep(sync_delay)
+            
+            # Capturar (siempre 20ms)
+            capture_start = time.time()
             waveform, capture_time = self.capture_one_frame()
+            capture_timestamp = time.time()
             self.capture_count += 1
             
-            # Demodular (modo rápido para captura continua)
+            # Decidir modo según estado del tracker
+            use_fast_mode = self.ssb_tracker.should_use_fast_mode()
+            ssb_expected_pos = self.ssb_tracker.get_expected_ssb_position_ms()
+            
+            # Demodular
+            demod_start = time.time()
             results = demodulate_ssb(
                 waveform, 
                 scs=self.scs, 
                 sample_rate=self.sample_rate,
                 n_symbols_display=self.n_symbols,
                 verbose=False,
-                fast_mode=False  # Omite procesamiento de 8 SSB bursts
+                fast_mode=use_fast_mode,
+                ssb_expected_position_ms=ssb_expected_pos
             )
+            demod_time = (time.time() - demod_start) * 1000
+            
+            # Procesar resultado con tracker
+            results = self.ssb_tracker.process_demodulation_result(
+                results, 
+                len(waveform),
+                capture_timestamp
+            )
+            
+            # Actualizar timing para próxima captura
+            self.ssb_tracker.update_timing_for_next_capture()
             
             # Verificar si se detectó SSB válido
             ssb_detected = results is not None and results.get('cell_id', -1) >= 0
@@ -179,20 +223,42 @@ class ContinuousCapture:
             
             # Mostrar info en consola
             timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            sync_state = results.get('sync_state', 'unknown') if results else 'unknown'
+            
+            # Símbolo según estado
+            state_symbol = {
+                'acquisition': '🔍',
+                'tracking': '▶',
+                'tracking_weak': '⚠',
+                'tracking_lost': '⊗',
+                'acquisition_failed': '⊗',
+                'acquisition_triggered': '🔄'
+            }.get(sync_state, '?')
             
             if ssb_detected:
-                print(f'[{timestamp}] Frame #{self.capture_count:3d} | '
-                      f'Cap: {capture_time*1000:.1f}ms | ', end="")
-                # demodulate_ssb imprime [Demod: Xms] aquí
-                print(f'| ✓ SSB | '
-                      f'Cell ID: {results["cell_id"]:4d} | '
+                tracker_info = results.get('tracker_info', '')
+                ssb_pos = results.get('ssb_position_ms', 0)
+                mode_str = 'FAST' if use_fast_mode else 'FULL'
+                sync_info = f'Sync:{sync_delay*1000:.0f}ms' if sync_delay > 0.001 else ''
+                
+                print(f'[{timestamp}] {state_symbol} Frame #{self.capture_count:3d} | '
+                      f'Cap: {capture_time*1000:.1f}ms ({len(waveform)/1e3:.0f}k) {sync_info} | '
+                      f'Demod: {demod_time:.1f}ms [{mode_str}] | '
+                      f'Cell: {results["cell_id"]:4d} | '
                       f'SNR: {results["snr_db"]:5.1f}dB | '
-                      f'Pwr: {results["power_db"]:5.1f}dB')
+                      f'SSB@{ssb_pos:.1f}ms')
+                if tracker_info:
+                    print(f'         {tracker_info}')
             else:
-                print(f'[{timestamp}] Frame #{self.capture_count:3d} | '
-                      f'Cap: {capture_time*1000:.1f}ms | ', end="")
-                # demodulate_ssb imprime [Demod: Xms] aquí
-                print(f'| ⊗ Sin SSB')
+                tracker_info = results.get('tracker_info', 'Sin SSB') if results else 'Error'
+                mode_str = 'FAST' if use_fast_mode else 'FULL'
+                sync_info = f'Sync:{sync_delay*1000:.0f}ms' if sync_delay > 0.001 else ''
+                
+                print(f'[{timestamp}] {state_symbol} Frame #{self.capture_count:3d} | '
+                      f'Cap: {capture_time*1000:.1f}ms ({len(waveform)/1e3:.0f}k) {sync_info} | '
+                      f'Demod: {demod_time:.1f}ms [{mode_str}]')
+                if tracker_info:
+                    print(f'         {tracker_info}')
             
             return results
             
@@ -200,6 +266,8 @@ class ContinuousCapture:
             print(f'[{datetime.now().strftime("%H:%M:%S.%f")[:-3]}] '
                   f'Frame #{self.capture_count:3d} | '
                   f'✗ Error: {str(e)[:50]}')
+            # Notificar fallo al tracker
+            self.ssb_tracker.process_demodulation_result(None, 0, time.time())
             return None
 
 
@@ -335,6 +403,25 @@ Ejemplos de uso:
                     print(f'✓ Tiempo promedio de captura: {avg_time:.2f} ms')
                 if args.save_images:
                     print(f'✓ Imágenes guardadas en carpeta "captures/"')
+                
+                # Estadísticas del tracker
+                stats = capturer.ssb_tracker.get_statistics()
+                print(f'\n{"="*60}')
+                print(f'{"ESTADÍSTICAS DE TRACKING":^60}')
+                print(f'{"="*60}')
+                print(f'Estado final        : {stats["state"]}')
+                print(f'Frames totales      : {stats["total_frames"]}')
+                print(f'Frames exitosos     : {stats["successful_frames"]} ({stats["overall_efficiency"]:.1f}%)')
+                print(f'Adquisiciones       : {stats["acquisitions"]} (Tasa: {stats["reacquisition_rate"]:.1f}%)')
+                print(f'Frames en tracking  : {stats["successful_tracks"]} ({stats["tracking_efficiency"]:.1f}%)')
+                if stats["known_cells"]:
+                    print(f'Celdas conocidas    : {stats["known_cells"]}')
+                if stats["dominant_cell"] is not None:
+                    print(f'Celda dominante     : {stats["dominant_cell"]}')
+                if stats["cfo_khz"] is not None:
+                    print(f'CFO final           : {stats["cfo_khz"]:.2f} kHz')
+                print(f'Duración captura    : {stats["capture_duration_ms"]:.1f} ms')
+                print(f'{"="*60}')
         else:
             # Modo con GUI - visualización animada
             # Verificar si hay display disponible
@@ -427,6 +514,25 @@ Ejemplos de uso:
             if capturer.capture_times:
                 avg_time = np.mean(capturer.capture_times) * 1000
                 print(f'✓ Tiempo promedio de captura: {avg_time:.2f} ms')
+            
+            # Estadísticas del tracker
+            stats = capturer.ssb_tracker.get_statistics()
+            print(f'\n{"="*60}')
+            print(f'{"ESTADÍSTICAS DE TRACKING":^60}')
+            print(f'{"="*60}')
+            print(f'Estado final        : {stats["state"]}')
+            print(f'Frames totales      : {stats["total_frames"]}')
+            print(f'Frames exitosos     : {stats["successful_frames"]} ({stats["overall_efficiency"]:.1f}%)')
+            print(f'Adquisiciones       : {stats["acquisitions"]} (Tasa: {stats["reacquisition_rate"]:.1f}%)')
+            print(f'Frames en tracking  : {stats["successful_tracks"]} ({stats["tracking_efficiency"]:.1f}%)')
+            if stats["known_cells"]:
+                print(f'Celdas conocidas    : {stats["known_cells"]}')
+            if stats["dominant_cell"] is not None:
+                print(f'Celda dominante     : {stats["dominant_cell"]}')
+            if stats["cfo_khz"] is not None:
+                print(f'CFO final           : {stats["cfo_khz"]:.2f} kHz')
+            print(f'Duración captura    : {stats["capture_duration_ms"]:.1f} ms')
+            print(f'{"="*60}')
         
     except KeyboardInterrupt:
         print('\n\n⚠ Interrumpido por usuario')
